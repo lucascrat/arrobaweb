@@ -1,0 +1,16 @@
+export type Screen = 
+  | 'onboarding' 
+  | 'registration' 
+  | 'chat-list' 
+  | 'chat-room' 
+  | 'search' 
+  | 'create-group' 
+  | 'business-profile' 
+  | 'catalog' 
+  | 'product-details' 
+  | 'name-store' 
+  | 'wallet' 
+  | 'subscription'
+  | 'notifications'
+  | 'profile'
+  | 'cloudflare-config';

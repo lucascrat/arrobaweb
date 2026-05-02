@@ -1,0 +1,58 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
+
+@theme {
+  --font-sans: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  
+  --color-primary: #6366f1; /* Indigo 500 */
+  --color-on-primary: #ffffff;
+  --color-primary-container: rgba(79, 70, 229, 0.2);
+  --color-on-primary-container: #e0e7ff;
+  
+  --color-secondary: #94a3b8; /* Slate 400 */
+  --color-secondary-container: rgba(255, 255, 255, 0.05);
+  --color-on-secondary-container: #f1f5f9;
+  
+  --color-tertiary: #22d3ee; /* Cyan 400 */
+  --color-tertiary-container: rgba(34, 211, 238, 0.1);
+  
+  --color-surface: #0f172a; /* Deep Slate */
+  --color-surface-container-low: rgba(255, 255, 255, 0.03);
+  --color-surface-container-high: rgba(255, 255, 255, 0.1);
+  --color-on-surface: #f1f5f9;
+  --color-on-surface-variant: #94a3b8;
+  
+  --color-outline: rgba(255, 255, 255, 0.1);
+  --color-outline-variant: rgba(255, 255, 255, 0.05);
+  
+  --shadow-glass: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  --shadow-primary-glow: 0 0 20px rgba(99, 102, 241, 0.3);
+}
+
+@layer base {
+  body {
+    @apply bg-surface text-on-surface antialiased font-sans min-h-screen;
+    background-image: 
+      radial-gradient(at 0% 0%, rgba(79, 70, 229, 0.15) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, rgba(192, 38, 211, 0.1) 0px, transparent 50%);
+  }
+}
+
+@layer components {
+  .glass {
+    @apply bg-white/5 backdrop-blur-xl border border-white/10 shadow-glass;
+  }
+  .glass-card {
+    @apply bg-white/5 backdrop-blur-lg border border-white/10 rounded-[2rem] transition-all duration-300;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}

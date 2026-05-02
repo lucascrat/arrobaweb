@@ -1,0 +1,13 @@
+{
+  "name": "Arroba",
+  "description": "Digital Sovereignty Protocol - A sovereign identity and secure communication platform.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "messaging",
+    "payments",
+    "identity"
+  ]
+}

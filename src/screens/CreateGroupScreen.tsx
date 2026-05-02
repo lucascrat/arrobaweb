@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Search, Camera, ChevronRight, AtSign, Check, Loader2 } from 'lucide-react';
 import { Screen } from '../types';
 import { useAuth } from '../lib/AuthContext';
@@ -18,6 +18,9 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ setScreen 
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [groupAvatar, setGroupAvatar] = useState<string | null>(null);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const fetchUsers = async () => {
@@ -38,6 +41,25 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ setScreen 
 
     fetchUsers();
   }, [user]);
+
+  const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingAvatar(true);
+    soundManager.playClick();
+    try {
+      const { uploadToR2 } = await import('../lib/r2');
+      const publicUrl = await uploadToR2(file);
+      setGroupAvatar(publicUrl);
+      soundManager.playChime();
+    } catch (error) {
+      console.error("Group avatar upload error:", error);
+      soundManager.playAlert();
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  };
 
   const toggleUser = (userId: string) => {
     setSelectedUserIds(prev => 
@@ -63,7 +85,7 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ setScreen 
         updatedAt: serverTimestamp(),
         lastMessage: 'Grupo criado',
         lastMessageAt: serverTimestamp(),
-        groupAvatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(groupName)}&background=random&color=fff&size=128`
+        groupAvatar: groupAvatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(groupName)}&background=random&color=fff&size=128`
       });
 
       // Add initial system message
@@ -94,18 +116,36 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ setScreen 
           <button onClick={() => setScreen('chat-list')} className="p-2 text-slate-400 active:scale-95 transition-all"><X /></button>
           <h1 className="text-xl font-black tracking-tighter text-white">Novo Grupo</h1>
         </div>
-        <button className="p-2 text-slate-400 active:scale-95"><Search className="w-6 h-6" /></button>
       </header>
 
       <main className="pt-24 px-6 flex flex-col gap-10">
         <section className="w-full flex flex-col items-center gap-10">
           <div className="relative group">
-            <div className="w-24 h-24 rounded-[2rem] bg-white/5 backdrop-blur-xl flex items-center justify-center border border-white/10 shadow-glass cursor-pointer overflow-hidden transition-all hover:scale-105 active:scale-95">
-              <Camera className="w-10 h-10 text-slate-500" />
+            <div 
+              onClick={() => !isUploadingAvatar && fileInputRef.current?.click()}
+              className="w-24 h-24 rounded-[2rem] bg-white/5 backdrop-blur-xl flex items-center justify-center border border-white/10 shadow-glass cursor-pointer overflow-hidden transition-all hover:scale-105 active:scale-95"
+            >
+              {isUploadingAvatar ? (
+                <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
+              ) : groupAvatar ? (
+                <img src={groupAvatar} className="w-full h-full object-cover" alt="Group" />
+              ) : (
+                <Camera className="w-10 h-10 text-slate-500" />
+              )}
             </div>
-            <div className="absolute -bottom-1 -right-1 bg-indigo-500 text-white p-2.5 rounded-xl shadow-primary-glow border-2 border-slate-950">
+            <button 
+              onClick={() => fileInputRef.current?.click()}
+              className="absolute -bottom-1 -right-1 bg-indigo-500 text-white p-2.5 rounded-xl shadow-primary-glow border-2 border-slate-950"
+            >
               <Camera className="w-4 h-4" />
-            </div>
+            </button>
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              className="hidden" 
+              accept="image/*" 
+              onChange={handleAvatarUpload} 
+            />
           </div>
 
           <div className="w-full space-y-6">

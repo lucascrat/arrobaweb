@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Phone, Video, MoreVertical, Smile, Paperclip, Send, CheckCheck, Zap } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { ArrowLeft, Phone, Video, MoreVertical, Smile, Paperclip, Send, CheckCheck, Zap, Loader2, Image as ImageIcon } from 'lucide-react';
 import { Screen } from '../types';
 import { soundManager } from '../lib/sounds';
 import { useAuth } from '../lib/AuthContext';
 import { db } from '../lib/firebase';
 import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, getDoc } from 'firebase/firestore';
+import { uploadToR2 } from '../lib/r2';
 
 interface ChatRoomScreenProps {
   setScreen: (s: Screen) => void;
@@ -16,6 +17,8 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
   const [inputText, setInputText] = useState('');
   const [messages, setMessages] = useState<any[]>([]);
   const [chatInfo, setChatInfo] = useState<any>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!chatId || !user) return;
@@ -100,6 +103,35 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
     }
   };
 
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !chatId || !user) return;
+
+    setIsUploading(true);
+    soundManager.playClick();
+    
+    try {
+      const publicUrl = await uploadToR2(file);
+      
+      await addDoc(collection(db, 'chats', chatId, 'messages'), {
+        senderId: user.uid,
+        image: publicUrl,
+        type: 'image',
+        createdAt: serverTimestamp(),
+        status: 'sent',
+        avatar: profile?.photoURL || user.photoURL
+      });
+
+      soundManager.playSent();
+    } catch (error) {
+      console.error("Upload error:", error);
+      soundManager.playAlert();
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col">
       <header className="fixed top-0 left-0 right-0 h-16 bg-slate-900/40 backdrop-blur-2xl border-b border-white/5 flex items-center px-4 justify-between z-50 shadow-sm">
@@ -177,10 +209,24 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            className="w-full bg-white/5 border border-white/10 rounded-full py-3 px-5 text-sm font-medium text-white placeholder-slate-500 focus:ring-1 focus:ring-indigo-500/50 outline-none" 
-            placeholder="Digite sua mensagem..." 
+            disabled={isUploading}
+            className="w-full bg-white/5 border border-white/10 rounded-full py-3 px-5 text-sm font-medium text-white placeholder-slate-500 focus:ring-1 focus:ring-indigo-500/50 outline-none disabled:opacity-50" 
+            placeholder={isUploading ? "Enviando arquivo..." : "Digite sua mensagem..."} 
           />
-          <button className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500"><Paperclip className="w-5 h-5" /></button>
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            className="hidden" 
+            accept="image/*" 
+            onChange={handleFileUpload} 
+          />
+          <button 
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isUploading}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-indigo-400 transition-colors disabled:opacity-50"
+          >
+            {isUploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Paperclip className="w-5 h-5" />}
+          </button>
         </div>
         <button 
           onClick={handleSend}

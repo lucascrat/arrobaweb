@@ -27,7 +27,7 @@ export async function uploadToR2(file: File): Promise<string> {
   });
 
   if (!uploadResponse.ok) {
-    throw new Error('Failed to upload file to R2');
+    throw new Error('Falha ao fazer upload para o Cloudflare R2.');
   }
 
   return publicUrl;

@@ -31,6 +31,19 @@ export const ChatListScreen: React.FC<ChatListScreenProps> = ({ setScreen, setSe
     );
 
     const unsubscribe = onSnapshot(chatsQuery, async (snapshot) => {
+      // Handle notifications for new remote messages
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === 'modified' && !snapshot.metadata.hasPendingWrites) {
+          const data = change.doc.data();
+          if (document.hidden && Notification.permission === 'granted') {
+            new Notification('Soberania App: Nova Mensagem', {
+              body: data.lastMessage || 'Você recebeu uma nova mensagem'
+            });
+          }
+          soundManager.playClick();
+        }
+      });
+
       const dataPromises = snapshot.docs.map(async (chatDoc) => {
         const data = chatDoc.data();
         let chatInfo: any = { ...data, id: chatDoc.id };

@@ -182,6 +182,12 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
         status: 'sent',
         avatar: profile?.photoURL || user.photoURL
       });
+
+      await updateDoc(doc(db, 'chats', chatId), {
+        lastMessage: text,
+        lastMessageAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
     } catch (error) {
       console.error("Error sending message:", error);
       setErrorMessage("Erro ao enviar mensagem. Tente novamente.");
@@ -213,6 +219,12 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
         createdAt: serverTimestamp(),
         status: 'sent',
         avatar: profile?.photoURL || user.photoURL
+      });
+
+      await updateDoc(doc(db, 'chats', chatId), {
+        lastMessage: `Arquivo: ${file.name}`,
+        lastMessageAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
       });
 
       soundManager.playSent();

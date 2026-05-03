@@ -41,7 +41,7 @@ service cloud.firestore {
 
     // Chat Rules
     match /chats/{chatId} {
-      allow get: if isSignedIn() && request.auth.uid in resource.data.participants;
+      allow get: if isSignedIn() && (resource == null || request.auth.uid in resource.data.participants);
       allow list: if isSignedIn() && request.auth.uid in resource.data.participants;
       
       allow create: if isSignedIn() && 

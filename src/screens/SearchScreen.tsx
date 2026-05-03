@@ -4,7 +4,7 @@ import { Screen } from '../types';
 import { BottomNav } from '../components/layout/BottomNav';
 import { useAuth } from '../lib/AuthContext';
 import { db } from '../lib/firebase';
-import { collection, query, where, getDocs, limit, doc, setDoc, serverTimestamp, addDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, limit, doc, setDoc, serverTimestamp, addDoc, getDoc } from 'firebase/firestore';
 
 interface SearchScreenProps {
   setScreen: (s: Screen) => void;
@@ -132,29 +132,22 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ setScreen, setSelect
     setLoading(true);
     try {
       // For simplicity, we create a deterministic ID based on the two UIDs
-      const chatId = [user.uid, targetUser.uid].sort().join('_');
+      const chatId = [user.uid, targetUser.id].sort().join('_');
       const chatRef = doc(db, 'chats', chatId);
-      const chatSnap = await getDocs(query(collection(db, 'chats'), where('participants', 'array-contains', user.uid)));
       
-      // Check if chat already exists in user's active chats (simplified check)
-      let existingChat = null;
-      chatSnap.docs.forEach(d => {
-        const p = d.data().participants;
-        if (p.includes(targetUser.uid)) existingChat = d.id;
-      });
+      const chatSnap = await getDoc(chatRef);
 
-      if (!existingChat) {
+      if (!chatSnap.exists()) {
         await setDoc(chatRef, {
-          participants: [user.uid, targetUser.uid],
+          participants: [user.uid, targetUser.id],
+          isGroup: false,
           updatedAt: serverTimestamp(),
           lastMessage: 'Nova conversa iniciada',
           lastMessageAt: serverTimestamp()
         });
-        setSelectedChatId(chatId);
-      } else {
-        setSelectedChatId(existingChat);
       }
       
+      setSelectedChatId(chatId);
       setScreen('chat-room');
     } catch (error) {
       console.error("Error starting chat:", error);

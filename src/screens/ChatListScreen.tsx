@@ -18,6 +18,8 @@ export const ChatListScreen: React.FC<ChatListScreenProps> = ({ setScreen, setSe
   const [activeTab, setActiveTab] = useState<'CHATS' | 'GRUPOS' | 'STATUS'>('CHATS');
   const [chats, setChats] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -71,43 +73,88 @@ export const ChatListScreen: React.FC<ChatListScreenProps> = ({ setScreen, setSe
   }, [user]);
 
   const filteredChats = chats.filter(chat => {
-    if (activeTab === 'GRUPOS') return chat.isGroup;
-    if (activeTab === 'CHATS') return !chat.isGroup;
-    return true;
+    // First filter by tab
+    const matchesTab = activeTab === 'GRUPOS' ? chat.isGroup : (activeTab === 'CHATS' ? !chat.isGroup : true);
+    if (!matchesTab) return false;
+
+    // Then filter by search query
+    if (!searchQuery) return true;
+    const query = searchQuery.toLowerCase();
+    return (
+      chat.name?.toLowerCase().includes(query) || 
+      chat.username?.toLowerCase().includes(query)
+    );
   });
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col pb-24 overflow-x-hidden">
       <header className="fixed top-0 left-0 right-0 bg-slate-900/40 backdrop-blur-2xl border-b border-white/5 z-50">
         <div className="h-16 px-4 flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <button 
-              onClick={() => {
-                soundManager.playClick();
-                setScreen('profile');
-              }}
-              className="relative active:scale-95 transition-all"
-            >
-              <img 
-                src={profile?.photoURL || user?.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400&h=400&fit=crop'} 
-                className="w-10 h-10 rounded-xl object-cover border border-white/10" 
-                alt="Profile" 
+          {!isSearchOpen ? (
+            <>
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={() => {
+                    soundManager.playClick();
+                    setScreen('profile');
+                  }}
+                  className="relative active:scale-95 transition-all"
+                >
+                  <img 
+                    src={profile?.photoURL || user?.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400&h=400&fit=crop'} 
+                    className="w-10 h-10 rounded-xl object-cover border border-white/10" 
+                    alt="Profile" 
+                  />
+                  <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-cyan-500 rounded-full border-2 border-slate-900" />
+                </button>
+                <h1 className="text-2xl font-black tracking-tighter text-white">Arroba</h1>
+              </div>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => {
+                    setIsSearchOpen(true);
+                    soundManager.playClick();
+                  }}
+                  className="p-2 text-slate-400 rounded-full hover:bg-white/5 active:scale-90 transition-transform"
+                >
+                  <Search className="w-6 h-6" />
+                </button>
+                <button 
+                  onClick={() => {
+                    soundManager.playClick();
+                    setScreen('notifications');
+                  }}
+                  className="p-2 text-slate-400 rounded-full hover:bg-white/5 relative"
+                >
+                  <Bell className="w-6 h-6" />
+                  <div className="absolute top-2.5 right-2.5 w-2 h-2 bg-indigo-500 rounded-full border border-slate-900 shadow-primary-glow" />
+                </button>
+                <button className="p-2 text-slate-400 rounded-full hover:bg-white/5"><MoreVertical className="w-6 h-6" /></button>
+              </div>
+            </>
+          ) : (
+            <div className="flex-1 flex items-center gap-3 bg-white/5 rounded-2xl px-4 py-2 border border-white/10 mx-2 glass-card">
+              <Search className="w-4 h-4 text-indigo-400" />
+              <input 
+                autoFocus
+                type="text" 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Buscar conversas ou @username..."
+                className="flex-1 bg-transparent border-none outline-none text-white text-sm font-medium placeholder:text-slate-500 font-sans"
               />
-              <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-cyan-500 rounded-full border-2 border-slate-900" />
-            </button>
-            <h1 className="text-2xl font-black tracking-tighter text-white">Arroba</h1>
-          </div>
-          <div className="flex items-center gap-2">
-            <button className="p-2 text-slate-400 rounded-full hover:bg-white/5"><Search className="w-6 h-6" /></button>
-            <button 
-              onClick={() => setScreen('notifications')}
-              className="p-2 text-slate-400 rounded-full hover:bg-white/5 relative"
-            >
-              <Bell className="w-6 h-6" />
-              <div className="absolute top-2.5 right-2.5 w-2 h-2 bg-indigo-500 rounded-full border border-slate-900 shadow-primary-glow" />
-            </button>
-            <button className="p-2 text-slate-400 rounded-full hover:bg-white/5"><MoreVertical className="w-6 h-6" /></button>
-          </div>
+              <button 
+                onClick={() => {
+                  setIsSearchOpen(false);
+                  setSearchQuery('');
+                  soundManager.playClick();
+                }}
+                className="p-1 text-slate-400 hover:text-white"
+              >
+                <Plus className="w-4 h-4 rotate-45" />
+              </button>
+            </div>
+          )}
         </div>
         <div className="flex gap-8 px-4 overflow-x-auto no-scrollbar">
           {(['CHATS', 'GRUPOS', 'STATUS'] as const).map((label) => (

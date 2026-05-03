@@ -12,6 +12,7 @@ import {
   Zap,
   Loader2,
   Volume2,
+  Bell,
   Camera,
   Cloud
 } from 'lucide-react';
@@ -225,6 +226,67 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ setScreen }) => {
               </div>
             </motion.div>
           ))}
+        </section>
+
+        {/* Notification Preferences */}
+        <section className="glass-card p-6 border border-white/10 flex flex-col gap-6">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 flex items-center justify-center text-indigo-400">
+              <Bell className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-black text-white tracking-tight uppercase">Preferências de Alerta</h3>
+              <p className="text-[10px] font-bold text-slate-500">Configure como você recebe os sinais</p>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-white/5 rounded-xl">
+                  <Volume2 className="w-4 h-4 text-slate-400" />
+                </div>
+                <span className="text-xs font-bold text-slate-200">Notificações Sonoras</span>
+              </div>
+              <button 
+                onClick={async () => {
+                  const current = profile?.notificationSettings?.soundEnabled ?? true;
+                  soundManager.playClick();
+                  if (user) {
+                    await updateDoc(doc(db, 'users', user.uid), {
+                      'notificationSettings.soundEnabled': !current
+                    });
+                  }
+                }}
+                className={`w-12 h-6 rounded-full transition-all relative ${profile?.notificationSettings?.soundEnabled !== false ? 'bg-indigo-500' : 'bg-slate-800'}`}
+              >
+                <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${profile?.notificationSettings?.soundEnabled !== false ? 'left-7' : 'left-1'}`} />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-white/5 rounded-xl">
+                  <Zap className="w-4 h-4 text-slate-400" />
+                </div>
+                <span className="text-xs font-bold text-slate-200">Notificações Push</span>
+              </div>
+              <button 
+                onClick={async () => {
+                  const current = profile?.notificationSettings?.pushEnabled ?? true;
+                  soundManager.playClick();
+                  if (user) {
+                    await updateDoc(doc(db, 'users', user.uid), {
+                      'notificationSettings.pushEnabled': !current
+                    });
+                  }
+                }}
+                className={`w-12 h-6 rounded-full transition-all relative ${profile?.notificationSettings?.pushEnabled !== false ? 'bg-cyan-500' : 'bg-slate-800'}`}
+              >
+                <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${profile?.notificationSettings?.pushEnabled !== false ? 'left-7' : 'left-1'}`} />
+              </button>
+            </div>
+          </div>
         </section>
 
         {/* Menu Items */}

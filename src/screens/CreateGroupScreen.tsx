@@ -68,8 +68,27 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ setScreen 
     soundManager.playClick();
   };
 
+  const handleGroupNameChange = (name: string) => {
+    setGroupName(name);
+    // Auto-suggest username if it hasn't been manually tweaked significantly or is empty
+    const slug = name.toLowerCase()
+      .trim()
+      .replace(/[^\w\s-]/g, '')
+      .replace(/[\s_-]+/g, '_')
+      .replace(/^-+|-+$/g, '');
+    
+    setGroupUsername(slug);
+  };
+
+  const handleUsernameChange = (val: string) => {
+    // Only allow URL friendly characters
+    const clean = val.toLowerCase().replace(/[^a-z0-9_]/g, '');
+    setGroupUsername(clean);
+  };
+
   const handleCreateGroup = async () => {
-    if (!groupName || selectedUserIds.length === 0 || !user) return;
+    const finalUsername = groupUsername || groupName.toLowerCase().replace(/[^a-z0-9_]/g, '');
+    if (!groupName || selectedUserIds.length === 0 || !user || !finalUsername) return;
     
     setIsCreating(true);
     try {
@@ -78,7 +97,7 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ setScreen 
       const chatRef = await addDoc(collection(db, 'chats'), {
         participants,
         groupName,
-        username: groupUsername.toLowerCase().replace(/[^a-z0-9_]/g, ''),
+        username: finalUsername,
         isGroup: true,
         createdBy: user.uid,
         createdAt: serverTimestamp(),
@@ -154,7 +173,7 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ setScreen 
               <div className="h-16 p-5 rounded-2xl bg-white/5 border border-white/10 flex items-center focus-within:border-indigo-500/30 transition-all shadow-glass">
                 <input 
                   value={groupName}
-                  onChange={(e) => setGroupName(e.target.value)}
+                  onChange={(e) => handleGroupNameChange(e.target.value)}
                   className="bg-transparent border-none focus:ring-0 w-full text-white font-bold placeholder-slate-600 outline-none" 
                   placeholder="Ex: Galera do Design" 
                 />
@@ -166,8 +185,8 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ setScreen 
                 <AtSign className="w-5 h-5 text-indigo-500" />
                 <input 
                   value={groupUsername}
-                  onChange={(e) => setGroupUsername(e.target.value)}
-                  className="bg-transparent border-none focus:ring-0 w-full text-white font-black placeholder-slate-600 outline-none" 
+                  onChange={(e) => handleUsernameChange(e.target.value)}
+                  className="bg-transparent border-none focus:ring-0 w-full text-white font-black placeholder-slate-600 outline-none uppercase" 
                   placeholder="churrasco_fds" 
                 />
               </div>

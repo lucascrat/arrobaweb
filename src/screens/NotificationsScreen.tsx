@@ -3,6 +3,9 @@ import { Bell, MessageSquare, AtSign, Zap, ArrowLeft, MoreVertical, Trash2, Chec
 import { motion, AnimatePresence } from 'motion/react';
 import { Screen } from '../types';
 import { soundManager } from '../lib/sounds';
+import { useAuth } from '../lib/AuthContext';
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 
 interface NotificationsScreenProps {
   setScreen: (screen: Screen) => void;
@@ -24,16 +27,24 @@ interface Notification {
 }
 
 export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({ setScreen }) => {
+  const { profile, user } = useAuth();
   const [activeTab, setActiveTab] = useState<'all' | NotificationType>('all');
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'week'>('all');
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
-  const [soundEnabled, setSoundEnabled] = useState(soundManager.isEnabled());
+  const soundEnabled = profile?.notificationSettings?.soundEnabled ?? true;
 
-  const toggleSound = () => {
+  const toggleSound = async () => {
     const newState = !soundEnabled;
-    setSoundEnabled(newState);
-    soundManager.setEnabled(newState);
-    if (newState) soundManager.playClick();
+    soundManager.playClick();
+    if (user) {
+      try {
+        await updateDoc(doc(db, 'users', user.uid), {
+          'notificationSettings.soundEnabled': newState
+        });
+      } catch (err) {
+        console.error("Error updating sound setting:", err);
+      }
+    }
   };
 
   useEffect(() => {

@@ -16,17 +16,20 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ next }) => {
       setErrorStatus(null);
       soundManager.playClick();
       await signInWithGoogle();
-      // App.tsx handles navigation via AuthProvider
     } catch (error: any) {
-      console.error("Login error:", error);
+      console.error("Login error details:", error);
       soundManager.playAlert();
       
-      if (error.code === 'auth/popup-blocked') {
-        setErrorStatus("O popup foi bloqueado pelo seu navegador. Por favor, permita popups para este site.");
-      } else if (error.code === 'auth/unauthorized-domain') {
-        setErrorStatus("Domínio não autorizado. Adicione este domínio nas configurações do Firebase.");
+      const errorCode = error.code || '';
+      
+      if (errorCode === 'auth/popup-blocked') {
+        setErrorStatus("O popup de login foi bloqueado. Por favor, permita janelas pop-up para este site.");
+      } else if (errorCode === 'auth/unauthorized-domain' || error.message?.includes('unauthorized-domain')) {
+        setErrorStatus(`Domínio não autorizado: ${window.location.hostname}. Adicione este domínio no Console do Firebase > Authentication > Settings > Authorized Domains.`);
+      } else if (errorCode === 'auth/operation-not-allowed') {
+        setErrorStatus("O login com Google não está ativado no Firebase. Ative-o em Authentication > Sign-in method.");
       } else {
-        setErrorStatus("Ocorreu um erro ao entrar com o Google. Verifique sua conexão ou tente novamente.");
+        setErrorStatus("Não foi possível conectar com o Google. Verifique sua permissão de domínio no Firebase.");
       }
     }
   };

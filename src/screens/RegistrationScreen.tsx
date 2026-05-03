@@ -3,7 +3,7 @@ import { Search, AtSign, Check, Lock, ShieldCheck, ChevronRight, User, Store, Br
 import { motion, AnimatePresence } from 'motion/react';
 import { soundManager } from '../lib/sounds';
 import { auth, signInWithGoogle, db } from '../lib/firebase';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp, query, collection, where, getDocs, limit } from 'firebase/firestore';
 
 interface RegistrationScreenProps {
   next: () => void;
@@ -12,7 +12,7 @@ interface RegistrationScreenProps {
 type AccountType = 'personal' | 'business';
 
 export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({ next }) => {
-  const [username, setUsername] = useState('erick');
+  const [username, setUsername] = useState('');
   const [accountType, setAccountType] = useState<AccountType>('personal');
   const [storeName, setStoreName] = useState('');
   const [isRegistering, setIsRegistering] = useState(false);
@@ -24,9 +24,16 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({ next }) 
   };
 
   const handleNext = async () => {
-    const cleanUsername = username.toLowerCase().replace(/[^a-z0-9_]/g, '');
+    const cleanUsername = username.toLowerCase().trim().replace(/[^a-z0-9_]/g, '');
+    
     if (cleanUsername.length < 3) {
-      setError("O nome de usuário deve ter pelo menos 3 caracteres (letras, números ou sublinhados).");
+      setError("O nome de usuário @ deve ter pelo menos 3 caracteres (letras, números ou sublinhados).");
+      soundManager.playAlert();
+      return;
+    }
+
+    if (accountType === 'business' && storeName.trim().length < 3) {
+      setError("O nome da loja deve ter pelo menos 3 caracteres.");
       soundManager.playAlert();
       return;
     }
@@ -43,6 +50,17 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({ next }) 
       }
 
       if (!currentUser) throw new Error('Falha na autenticação');
+
+      // 1.5 Check if username is taken
+      const q = query(
+        collection(db, 'users'),
+        where('username', '==', cleanUsername),
+        limit(1)
+      );
+      const snapshot = await getDocs(q);
+      if (!snapshot.empty && snapshot.docs[0].id !== currentUser.uid) {
+        throw new Error('Este @username já está em uso por outro soberano.');
+      }
 
       // 2. Save to Firestore
       const userRef = doc(db, 'users', currentUser.uid);

@@ -42,7 +42,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ setScreen, setSelect
         if (!isCancelled) {
           const users = querySnapshot.docs
             .map(doc => ({ id: doc.id, ...doc.data() } as any))
-            .filter(u => u.uid !== user?.uid);
+            .filter(u => u.id !== user?.uid);
           setResults(users);
         }
       } catch (error) {

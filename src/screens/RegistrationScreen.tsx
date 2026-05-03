@@ -51,31 +51,42 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({ next }) 
 
       if (!currentUser) throw new Error('Falha na autenticação');
 
-      // 1.5 Check if username is taken
+      const isBusiness = accountType === 'business';
+
+      // 1.5 Check if username is taken - query lowercase
       const q = query(
         collection(db, 'users'),
         where('username', '==', cleanUsername),
         limit(1)
       );
       const snapshot = await getDocs(q);
-      if (!snapshot.empty && snapshot.docs[0].id !== currentUser.uid) {
-        throw new Error('Este @username já está em uso por outro soberano.');
+      
+      if (!snapshot.empty) {
+        const existingUser = snapshot.docs[0];
+        if (existingUser.id !== currentUser.uid) {
+          throw new Error('Este @username já está em uso por outro soberano.');
+        }
       }
 
-      // 2. Save to Firestore
+      // 2. Save/Update to Firestore
       const userRef = doc(db, 'users', currentUser.uid);
-      await setDoc(userRef, {
+      const userData = {
         uid: currentUser.uid,
         username: cleanUsername,
         accountType,
-        storeName: accountType === 'business' ? storeName : null,
+        storeName: isBusiness ? (storeName.trim() || 'Minha Loja') : null,
         email: currentUser.email,
-        displayName: currentUser.displayName,
-        photoURL: currentUser.photoURL,
+        displayName: currentUser.displayName || cleanUsername,
+        photoURL: currentUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${currentUser.uid}`,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      });
+        online: true,
+        lastSeen: serverTimestamp()
+      };
 
+      await setDoc(userRef, userData, { merge: true });
+
+      soundManager.playChime();
       next();
     } catch (err: any) {
       console.error(err);

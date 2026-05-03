@@ -33,12 +33,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Presence Logic
         const setOnlineStatus = async (isOnline: boolean) => {
           try {
-            await updateDoc(userRef, {
-              online: isOnline,
-              lastSeen: serverTimestamp()
-            });
+            // Check if user document exists before updating presence
+            const snap = await getDoc(userRef);
+            if (snap.exists()) {
+              await updateDoc(userRef, {
+                online: isOnline,
+                lastSeen: serverTimestamp()
+              });
+            }
           } catch (err) {
-            handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
+            console.warn("Could not set online status (might be new user):", err);
           }
         };
 

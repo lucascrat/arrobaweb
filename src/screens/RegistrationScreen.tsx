@@ -24,6 +24,11 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({ next }) 
   };
 
   const handleNext = async () => {
+    if (username.length < 3) {
+      setError("O nome de usuário deve ter pelo menos 3 caracteres.");
+      soundManager.playAlert();
+      return;
+    }
     soundManager.playChime();
     setIsRegistering(true);
     setError(null);
@@ -157,12 +162,12 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({ next }) 
           <div className="space-y-5">
             <div className="p-5 bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl flex items-center gap-4">
               <img 
-                src={auth.currentUser?.photoURL || ''} 
-                className="w-10 h-10 rounded-xl border border-white/10" 
+                src={auth.currentUser?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${auth.currentUser?.uid}`} 
+                className="w-10 h-10 rounded-xl border border-white/10 bg-slate-800" 
                 alt="Profile" 
               />
               <div className="flex-1">
-                <h4 className="text-white font-bold text-xs">{auth.currentUser?.displayName || 'Usuário'}</h4>
+                <h4 className="text-white font-bold text-xs">{auth.currentUser?.displayName || auth.currentUser?.email?.split('@')[0] || 'Usuário'}</h4>
                 <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Identidade Validada</p>
               </div>
               <div className="w-2 h-2 bg-emerald-500 rounded-full shadow-[0_0_10px_rgba(16,185,129,0.5)]" />

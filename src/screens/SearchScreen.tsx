@@ -18,37 +18,51 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ setScreen, setSelect
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const delayDebounceFn = setTimeout(() => {
-      if (searchTerm.trim().length > 2) {
-        handleSearch();
-      } else {
+    let isCancelled = false;
+
+    const performSearch = async () => {
+      if (searchTerm.trim().length <= 2) {
         setResults([]);
+        setLoading(false);
+        return;
       }
+
+      setLoading(true);
+      try {
+        const q = query(
+          collection(db, 'users'),
+          where('username', '>=', searchTerm.toLowerCase()),
+          where('username', '<=', searchTerm.toLowerCase() + '\uf8ff'),
+          limit(10)
+        );
+        const querySnapshot = await getDocs(q);
+        
+        if (!isCancelled) {
+          const users = querySnapshot.docs
+            .map(doc => ({ id: doc.id, ...doc.data() } as any))
+            .filter(u => u.uid !== user?.uid);
+          setResults(users);
+        }
+      } catch (error) {
+        if (!isCancelled) {
+          console.error("Search error:", error);
+        }
+      } finally {
+        if (!isCancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    const delayDebounceFn = setTimeout(() => {
+      performSearch();
     }, 500);
 
-    return () => clearTimeout(delayDebounceFn);
-  }, [searchTerm]);
-
-  const handleSearch = async () => {
-    setLoading(true);
-    try {
-      const q = query(
-        collection(db, 'users'),
-        where('username', '>=', searchTerm.toLowerCase()),
-        where('username', '<=', searchTerm.toLowerCase() + '\uf8ff'),
-        limit(10)
-      );
-      const querySnapshot = await getDocs(q);
-      const users = querySnapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() } as any))
-        .filter(u => u.uid !== user?.uid);
-      setResults(users);
-    } catch (error) {
-      console.error("Search error:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+    return () => {
+      isCancelled = true;
+      clearTimeout(delayDebounceFn);
+    };
+  }, [searchTerm, user?.uid]);
 
   const startChat = async (targetUser: any) => {
     if (!user) return;
@@ -165,4 +179,3 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ setScreen, setSelect
     </div>
   );
 };
-;

@@ -62,7 +62,7 @@ function AppContent() {
       case 'wallet':
         return <WalletScreen setScreen={setScreen} />;
       case 'search':
-        return <SearchScreen setScreen={setScreen} />;
+        return <SearchScreen setScreen={setScreen} setSelectedChatId={setSelectedChatId} />;
       case 'subscription':
         return <SubscriptionScreen setScreen={setScreen} />;
       case 'create-group':
@@ -85,7 +85,7 @@ function AppContent() {
   };
 
   return (
-    <div className="max-w-[480px] mx-auto min-h-screen relative shadow-2xl bg-white overflow-x-hidden font-manrope">
+    <div className="max-w-[480px] mx-auto min-h-screen relative shadow-2xl bg-slate-950 overflow-x-hidden font-manrope">
       <AnimatePresence mode="wait">
         <motion.div
           key={screen}

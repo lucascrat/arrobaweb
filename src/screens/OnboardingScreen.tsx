@@ -77,8 +77,12 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ next }) => {
         setErrorStatus("E-mail ou senha incorretos.");
       } else if (errorCode === 'auth/weak-password') {
         setErrorStatus("A senha deve ter pelo menos 6 caracteres.");
+      } else if (errorCode === 'auth/operation-not-allowed') {
+        setErrorStatus("O método de Login com E-mail não está ativado no Firebase Console (Authentication > Sign-in method).");
+      } else if (errorCode === 'auth/invalid-email') {
+        setErrorStatus("O formato do e-mail é inválido.");
       } else {
-        setErrorStatus("Erro ao autenticar. Tente novamente.");
+        setErrorStatus(`Erro: ${errorCode || 'Tente novamente'}`);
       }
     } finally {
       setLoading(false);
@@ -118,18 +122,28 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ next }) => {
           className="bg-white/5 backdrop-blur-2xl border border-white/10 rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden"
         >
           {/* Status/Error Messages */}
-          <AnimatePresence mode="wait">
-            {errorStatus && (
-              <motion.div 
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                className="mb-6 bg-red-500/10 border border-red-500/20 px-4 py-3 rounded-2xl text-xs font-bold text-red-400 uppercase tracking-wider text-center"
-              >
-                {errorStatus}
-              </motion.div>
+      <AnimatePresence mode="wait">
+        {errorStatus && (
+          <motion.div 
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="mb-6 bg-red-500/10 border border-red-500/20 px-4 py-3 rounded-2xl text-xs font-bold text-red-400 uppercase tracking-wider text-center"
+          >
+            {errorStatus}
+            {errorStatus.includes("Domínio") && (
+              <p className="mt-2 text-slate-400 font-bold lowercase normal-case tracking-normal">
+                Dica: Vá no Console do Firebase &gt; Auth &gt; Settings &gt; Authorized Domains e adicione "{window.location.hostname}".
+              </p>
             )}
-          </AnimatePresence>
+            {errorStatus.includes("Sign-in method") && (
+              <p className="mt-2 text-slate-400 font-bold lowercase normal-case tracking-normal">
+                Dica: Ative o método 'E-mail/Senha' ou 'Google' no Console do Firebase.
+              </p>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
           {/* Tab Switcher */}
           <div className="flex bg-slate-900/50 p-1 rounded-2xl mb-8 border border-white/5">

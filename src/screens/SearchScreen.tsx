@@ -100,7 +100,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ setScreen, setSelect
             querySnapshot.docs.forEach(doc => {
               const data = doc.data();
               if (doc.id !== user?.uid && !allUsers.find(u => u.id === doc.id)) {
-                allUsers.push({ id: doc.id, ...data });
+                allUsers.push({ id: doc.id, ...(data as any) });
               }
             });
           });

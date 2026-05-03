@@ -3,7 +3,7 @@ import { Search, AtSign, Check, Lock, ShieldCheck, ChevronRight, User, Store, Br
 import { motion, AnimatePresence } from 'motion/react';
 import { soundManager } from '../lib/sounds';
 import { auth, signInWithGoogle, db } from '../lib/firebase';
-import { doc, setDoc, serverTimestamp, query, collection, where, getDocs, limit } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp, query, collection, where, getDocs, limit, getDoc, updateDoc } from 'firebase/firestore';
 
 interface RegistrationScreenProps {
   next: () => void;
@@ -70,21 +70,35 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({ next }) 
 
       // 2. Save/Update to Firestore
       const userRef = doc(db, 'users', currentUser.uid);
-      const userData = {
-        uid: currentUser.uid,
-        username: cleanUsername,
-        accountType,
-        storeName: isBusiness ? (storeName.trim() || 'Minha Loja') : null,
-        email: currentUser.email,
-        displayName: currentUser.displayName || cleanUsername,
-        photoURL: currentUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${currentUser.uid}`,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        online: true,
-        lastSeen: serverTimestamp()
-      };
+      const userSnap = await getDoc(userRef);
 
-      await setDoc(userRef, userData, { merge: true });
+      if (!userSnap.exists()) {
+        const userData = {
+          uid: currentUser.uid,
+          username: cleanUsername,
+          accountType,
+          storeName: isBusiness ? (storeName.trim() || 'Minha Loja') : null,
+          email: currentUser.email || '',
+          displayName: currentUser.displayName || cleanUsername,
+          photoURL: currentUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${currentUser.uid}`,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          online: true,
+          lastSeen: serverTimestamp()
+        };
+        await setDoc(userRef, userData);
+      } else {
+        // User already exists
+        const existingData = userSnap.data();
+        if (existingData.username !== cleanUsername) {
+           throw new Error('Você já possui um @username. Não é possível alterá-lo.');
+        }
+        await updateDoc(userRef, {
+          online: true,
+          lastSeen: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+      }
 
       soundManager.playChime();
       next();

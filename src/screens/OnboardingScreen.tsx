@@ -9,14 +9,25 @@ interface OnboardingScreenProps {
 }
 
 export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ next }) => {
+  const [errorStatus, setErrorStatus] = React.useState<string | null>(null);
+
   const handleGoogleLogin = async () => {
     try {
+      setErrorStatus(null);
       soundManager.playClick();
       await signInWithGoogle();
       // App.tsx handles navigation via AuthProvider
-    } catch (error) {
+    } catch (error: any) {
       console.error("Login error:", error);
       soundManager.playAlert();
+      
+      if (error.code === 'auth/popup-blocked') {
+        setErrorStatus("O popup foi bloqueado pelo seu navegador. Por favor, permita popups para este site.");
+      } else if (error.code === 'auth/unauthorized-domain') {
+        setErrorStatus("Domínio não autorizado. Adicione este domínio nas configurações do Firebase.");
+      } else {
+        setErrorStatus("Ocorreu um erro ao entrar com o Google. Verifique sua conexão ou tente novamente.");
+      }
     }
   };
 
@@ -43,6 +54,21 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ next }) => {
             Sua identidade <span className="text-indigo-400">é</span> sua soberania.
           </p>
         </div>
+
+        {errorStatus && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-red-500/10 border border-red-500/20 p-4 rounded-2xl text-[10px] font-black text-red-400 uppercase tracking-wider leading-relaxed"
+          >
+            {errorStatus}
+            {errorStatus.includes("Domínio") && (
+              <p className="mt-2 text-slate-400 font-bold lowercase normal-case">
+                Dica: Vá no console do Firebase &gt; Authentication &gt; Settings &gt; Authorized Domains e adicione este domínio: {window.location.hostname}
+              </p>
+            )}
+          </motion.div>
+        )}
 
         <div className="grid grid-cols-3 gap-2 w-full pt-4">
           <div className="flex flex-col items-center gap-2">

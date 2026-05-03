@@ -21,7 +21,9 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ setScreen, setSelect
     let isCancelled = false;
 
     const performSearch = async () => {
-      if (searchTerm.trim().length <= 2) {
+      const sanitizedTerm = searchTerm.trim().toLowerCase().replace(/^@/, '').replace(/[^a-z0-9_]/g, '');
+      
+      if (sanitizedTerm.length <= 1) {
         setResults([]);
         setLoading(false);
         return;
@@ -31,8 +33,8 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ setScreen, setSelect
       try {
         const q = query(
           collection(db, 'users'),
-          where('username', '>=', searchTerm.toLowerCase()),
-          where('username', '<=', searchTerm.toLowerCase() + '\uf8ff'),
+          where('username', '>=', sanitizedTerm),
+          where('username', '<=', sanitizedTerm + '\uf8ff'),
           limit(10)
         );
         const querySnapshot = await getDocs(q);
@@ -135,10 +137,21 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ setScreen, setSelect
           </div>
           
           <div className="space-y-4">
-            {results.length === 0 && !loading && (
-              <div className="text-center py-20 opacity-30">
+            {results.length === 0 && !loading && searchTerm.trim().length > 0 && (
+              <div className="text-center py-20 opacity-40">
                 <Search className="w-12 h-12 mx-auto mb-4 text-slate-500" />
-                <p className="text-xs font-black uppercase tracking-widest">Aguardando busca...</p>
+                {searchTerm.trim().replace(/^@/, '').length <= 1 ? (
+                  <p className="text-xs font-black uppercase tracking-widest">Digite mais caracteres...</p>
+                ) : (
+                  <p className="text-xs font-black uppercase tracking-widest">Nenhum @usuário encontrado</p>
+                )}
+              </div>
+            )}
+
+            {results.length === 0 && !loading && searchTerm.trim().length === 0 && (
+              <div className="text-center py-20 opacity-30">
+                <AtSign className="w-12 h-12 mx-auto mb-4 text-slate-500" />
+                <p className="text-xs font-black uppercase tracking-widest">Busque pela @identidade</p>
               </div>
             )}
 

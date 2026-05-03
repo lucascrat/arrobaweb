@@ -24,8 +24,9 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({ next }) 
   };
 
   const handleNext = async () => {
-    if (username.length < 3) {
-      setError("O nome de usuário deve ter pelo menos 3 caracteres.");
+    const cleanUsername = username.toLowerCase().replace(/[^a-z0-9_]/g, '');
+    if (cleanUsername.length < 3) {
+      setError("O nome de usuário deve ter pelo menos 3 caracteres (letras, números ou sublinhados).");
       soundManager.playAlert();
       return;
     }
@@ -47,7 +48,7 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({ next }) 
       const userRef = doc(db, 'users', currentUser.uid);
       await setDoc(userRef, {
         uid: currentUser.uid,
-        username: username.toLowerCase().replace(/[^a-z0-9_]/g, ''),
+        username: cleanUsername,
         accountType,
         storeName: accountType === 'business' ? storeName : null,
         email: currentUser.email,

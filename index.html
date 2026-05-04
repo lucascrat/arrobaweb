@@ -3,7 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My Google AI Studio App</title>
+    <title>Arroba Messenger</title>
+    <script>
+      if (location.protocol === 'http:' && location.hostname !== 'localhost' && !location.hostname.includes('192.168.')) {
+        location.replace(`https://${location.hostname}${location.port ? ':' + location.port : ''}${location.pathname}${location.search}${location.hash}`);
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -710,31 +710,46 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
               <div 
                 onClick={() => setActiveReactionMessageId(activeReactionMessageId === msg.id ? null : msg.id)}
                 className={`
-                p-4 rounded-3xl space-y-2 backdrop-blur-md border border-white/10 shadow-lg cursor-pointer transition-all active:scale-[0.98]
-                ${msg.type === 'sent' ? 'bg-indigo-500/80 text-white rounded-tr-none' : 'bg-white/5 text-slate-100 rounded-tl-none' }
+                rounded-2xl overflow-hidden backdrop-blur-md border border-white/10 shadow-lg cursor-pointer transition-all active:scale-[0.98]
+                ${msg.type === 'sent' ? 'bg-indigo-500/80 text-white' : 'bg-white/5 text-slate-100'}
+                ${msg.image || msg.video ? 'p-1' : 'p-4'}
               `}>
-                {msg.text && <p className="text-sm font-medium leading-relaxed">{msg.text}</p>}
                 {msg.image && (
-                  <div className="space-y-2">
-                    <img src={msg.image} className="rounded-2xl w-full object-cover border border-white/10" alt="Shared" />
-                    {msg.caption && <p className="text-xs font-bold leading-relaxed text-slate-300">{msg.caption}</p>}
+                  <div className="flex flex-col gap-2">
+                    <img 
+                      src={msg.image} 
+                      className="rounded-xl w-full max-h-[400px] object-cover shadow-inner" 
+                      alt="Shared" 
+                      loading="lazy"
+                    />
+                    {msg.caption && <p className="px-3 pb-2 text-sm font-medium leading-relaxed">{msg.caption}</p>}
+                    {msg.text && <p className="px-3 pb-2 text-sm font-medium leading-relaxed">{msg.text}</p>}
                   </div>
                 )}
+
                 {msg.video && (
-                  <div className="space-y-2">
+                  <div className="flex flex-col gap-2">
                     <video 
                       src={msg.video} 
                       controls 
-                      className="rounded-2xl w-full max-h-64 bg-black border border-white/10" 
+                      className="rounded-xl w-full max-h-[400px] bg-black shadow-inner" 
                     />
-                    {msg.fileName && <p className="text-[10px] font-bold text-slate-400 truncate">{msg.fileName}</p>}
+                    {msg.text && <p className="px-3 pb-2 text-sm font-medium leading-relaxed">{msg.text}</p>}
                   </div>
                 )}
+
                 {msg.audio && (
-                  <VoiceMessage src={msg.audio} duration={msg.duration} />
+                  <div className="p-3">
+                    <VoiceMessage src={msg.audio} duration={msg.duration} />
+                  </div>
                 )}
+
+                {msg.text && !msg.image && !msg.video && !msg.audio && (
+                  <p className="text-sm font-medium leading-relaxed">{msg.text}</p>
+                )}
+
                 {msg.file && (
-                  <div className="flex items-center gap-3 p-2 bg-white/10 rounded-2xl border border-white/5">
+                  <div className="flex items-center gap-3 p-2 bg-white/10 rounded-xl border border-white/5 mx-2 my-2">
                     <div className="w-10 h-10 rounded-xl bg-indigo-500/20 flex items-center justify-center text-indigo-400">
                       <Paperclip className="w-5 h-5" />
                     </div>

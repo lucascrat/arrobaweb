@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowLeft, Phone, Video, MoreVertical, Smile, Paperclip, Send, CheckCheck, Zap, Loader2, Image as ImageIcon, Download } from 'lucide-react';
+import { ArrowLeft, Phone, Video, MoreVertical, Smile, Paperclip, Send, CheckCheck, Zap, Loader2, Image as ImageIcon, Download, Mic, Square, Play, Pause } from 'lucide-react';
 import { Screen } from '../types';
 import { soundManager } from '../lib/sounds';
 import { useAuth } from '../lib/AuthContext';
@@ -9,11 +9,100 @@ import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, g
 import { uploadToR2 } from '../lib/r2';
 import { handleFirestoreError, OperationType } from '../lib/firestoreErrorHandler';
 import { AlertCircle, X } from 'lucide-react';
+import { CallScreen } from './CallScreen';
 
 interface ChatRoomScreenProps {
   setScreen: (s: Screen) => void;
   chatId: string | null;
 }
+
+const VoiceMessage: React.FC<{ src: string; duration?: number }> = ({ src, duration }) => {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const audioRef = useRef<HTMLAudioElement>(null);
+
+  const togglePlayback = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (audioRef.current) {
+      if (isPlaying) {
+        audioRef.current.pause();
+      } else {
+        audioRef.current.play();
+      }
+      setIsPlaying(!isPlaying);
+    }
+  };
+
+  const onTimeUpdate = () => {
+    if (audioRef.current) {
+      setCurrentTime(audioRef.current.currentTime);
+    }
+  };
+
+  const onEnded = () => {
+    setIsPlaying(false);
+    setCurrentTime(0);
+  };
+
+  const formatTime = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const progress = duration ? (currentTime / duration) * 100 : 0;
+
+  return (
+    <div className="flex items-center gap-3 bg-white/5 p-3 rounded-2xl border border-white/10 min-w-[220px]">
+      <audio 
+        ref={audioRef} 
+        src={src} 
+        onTimeUpdate={onTimeUpdate} 
+        onEnded={onEnded}
+        onPause={() => setIsPlaying(false)}
+        onPlay={() => setIsPlaying(true)}
+        className="hidden" 
+      />
+      <button 
+        onClick={togglePlayback}
+        className="w-10 h-10 rounded-full bg-indigo-500 text-white flex items-center justify-center hover:scale-105 transition-transform shadow-lg shadow-indigo-500/20"
+      >
+        {isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current ml-0.5" />}
+      </button>
+      
+      <div className="flex-1 flex flex-col gap-1">
+        <div className="h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
+          <motion.div 
+            className="h-full bg-indigo-400"
+            animate={{ width: `${progress}%` }}
+            transition={{ type: 'spring', bounce: 0, duration: 0.2 }}
+          />
+        </div>
+        <div className="flex justify-between items-center">
+          <span className="text-[10px] font-bold text-slate-400">{formatTime(currentTime)}</span>
+          <span className="text-[10px] font-bold text-indigo-400">{duration ? formatTime(duration) : 'Áudio'}</span>
+        </div>
+      </div>
+      
+      <div className="flex flex-col items-center justify-center gap-0.5">
+         {[...Array(4)].map((_, i) => (
+           <motion.div 
+             key={i}
+             className="w-1 bg-indigo-400/40 rounded-full"
+             animate={{ 
+               height: isPlaying ? [4, 12, 6, 10][i] : 4 
+             }}
+             transition={{ 
+               repeat: Infinity, 
+               duration: 0.5, 
+               delay: i * 0.1 
+             }}
+           />
+         ))}
+      </div>
+    </div>
+  );
+};
 
 export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatId }) => {
   const { user, profile } = useAuth();
@@ -21,12 +110,20 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
   const [messages, setMessages] = useState<any[]>([]);
   const [chatInfo, setChatInfo] = useState<any>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const [otherUser, setOtherUser] = useState<any>(null);
   const [activeReactionMessageId, setActiveReactionMessageId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [activeCall, setActiveCall] = useState<{ isReceiving: boolean; isVideo?: boolean } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const chatInfoRef = useRef<any>(null);
 
   useEffect(() => {
     if (errorMessage) {
@@ -54,6 +151,7 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
           };
         }
         setChatInfo(info);
+        chatInfoRef.current = info;
 
         // Handle Typing Users
         if (data.typing) {
@@ -80,6 +178,8 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
       orderBy('createdAt', 'asc')
     );
 
+    let isFirstLoadMsgs = true;
+
     const unsubMsgs = onSnapshot(msgsQuery, (snapshot) => {
       const newMsgs = snapshot.docs.map(doc => {
         const data = doc.data();
@@ -91,19 +191,43 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
         } as any;
       });
       setMessages(newMsgs);
-      if (newMsgs.length > 0) {
-        const lastMsg = newMsgs[newMsgs.length - 1];
-        if (lastMsg.senderId !== user?.uid) {
-          soundManager.playClick();
-          const isMentioned = lastMsg.text?.includes(`@${profile?.username}`);
-          if (document.hidden || isMentioned) {
-             if (Notification.permission === 'granted') {
-               new Notification(isMentioned ? `MENCIONADO: ${chatInfo?.name}` : chatInfo?.name, {
-                 body: lastMsg.text,
-                 icon: chatInfo?.avatar
-               });
-             }
+
+      if (!isFirstLoadMsgs) {
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'added') {
+            const addedMsg = change.doc.data();
+            if (addedMsg.senderId !== user?.uid) {
+              soundManager.playChime();
+              
+              const isMentioned = addedMsg.text?.includes(`@${profile?.username}`);
+              
+              if (profile?.notificationSettings?.pushEnabled !== false) {
+                if (document.hidden || isMentioned) {
+                  if (Notification.permission === 'granted') {
+                    const chatName = chatInfoRef.current?.name || chatInfoRef.current?.username || 'Nova Mensagem';
+                    new Notification(isMentioned ? `MENCIONADO em ${chatName}` : chatName, {
+                      body: addedMsg.text || 'Nova mensagem de voz ou arquivo',
+                      icon: chatInfoRef.current?.avatar
+                    });
+                  }
+                }
+              }
+            }
           }
+        });
+      }
+      isFirstLoadMsgs = false;
+    });
+
+    // Listen for Incoming Calls
+    const callRef = doc(collection(db, 'calls'), chatId);
+    const unsubCall = onSnapshot(callRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        if (data.callerId && data.callerId !== user.uid && !data.endedAt) {
+          // It's an incoming call!
+          // We could play a ringtone here.
+          setActiveCall({ isReceiving: true, isVideo: data.isVideo });
         }
       }
     });
@@ -111,8 +235,13 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
     return () => {
       unsubChat();
       unsubMsgs();
+      unsubCall();
     };
   }, [chatId, user]);
+
+  const startCall = (isVideo: boolean) => {
+    setActiveCall({ isReceiving: false, isVideo });
+  };
 
   // Separate effect for other user in private chat
   useEffect(() => {
@@ -238,6 +367,111 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
     }
   };
 
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        if (recordingDuration < 1) {
+          // Recording too short, don't send
+          stream.getTracks().forEach(track => track.stop());
+          clearInterval(recordingTimerRef.current as NodeJS.Timeout);
+          setRecordingDuration(0);
+          setIsRecording(false);
+          setErrorMessage("Gravação muito curta.");
+          return;
+        }
+
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const audioFile = new File([audioBlob], `audio-${Date.now()}.webm`, { type: 'audio/webm' });
+        
+        // Ensure stream is stopped
+        stream.getTracks().forEach(track => track.stop());
+        
+        clearInterval(recordingTimerRef.current as NodeJS.Timeout);
+        setRecordingDuration(0);
+        setIsRecording(false);
+        setIsUploading(true);
+
+        try {
+          const publicUrl = await uploadToR2(audioFile);
+          
+          await addDoc(collection(db, 'chats', chatId!, 'messages'), {
+            senderId: user.uid,
+            audio: publicUrl,
+            contentType: 'audio',
+            fileName: audioFile.name,
+            fileSize: audioFile.size,
+            duration: recordingDuration,
+            createdAt: serverTimestamp(),
+            status: 'sent',
+            avatar: profile?.photoURL || user.photoURL
+          });
+
+          await updateDoc(doc(db, 'chats', chatId!), {
+            lastMessage: `🎤 Áudio`,
+            lastMessageAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          });
+
+          soundManager.playSent();
+        } catch (error) {
+           console.error("Audio Upload error:", error);
+           setErrorMessage("Erro ao enviar áudio.");
+           handleFirestoreError(error, OperationType.CREATE, `chats/${chatId}/messages`);
+        } finally {
+           setIsUploading(false);
+        }
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      soundManager.playClick();
+      
+      let seconds = 0;
+      recordingTimerRef.current = setInterval(() => {
+        seconds++;
+        setRecordingDuration(seconds);
+      }, 1000);
+      
+    } catch (error) {
+      console.error("Error accessing microphone:", error);
+      setErrorMessage("Permissão de microfone negada ou não suportada nesta versão.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+    }
+  };
+
+  const cancelRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.onstop = null; // Disable the onstop handler so it doesn't upload
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+      clearInterval(recordingTimerRef.current as NodeJS.Timeout);
+      setIsRecording(false);
+      setRecordingDuration(0);
+    }
+  };
+
+  const formatDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
   const handleReaction = async (messageId: string, emoji: string) => {
     if (!chatId || !user) return;
     const msgRef = doc(db, 'chats', chatId, 'messages', messageId);
@@ -311,8 +545,8 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
           </div>
         </div>
         <div className="flex items-center gap-1">
-          <button className="p-2 text-indigo-400 active:scale-90"><Phone className="w-5 h-5" /></button>
-          <button className="p-2 text-indigo-400 active:scale-90"><Video className="w-5 h-5" /></button>
+          <button onClick={() => startCall(false)} className="p-2 text-indigo-400 active:scale-90"><Phone className="w-5 h-5" /></button>
+          <button onClick={() => startCall(true)} className="p-2 text-indigo-400 active:scale-90"><Video className="w-5 h-5" /></button>
           <button className="p-2 text-slate-500"><MoreVertical className="w-5 h-5" /></button>
         </div>
       </header>
@@ -389,6 +623,9 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
                     {msg.fileName && <p className="text-[10px] font-bold text-slate-400 truncate">{msg.fileName}</p>}
                   </div>
                 )}
+                {msg.audio && (
+                  <VoiceMessage src={msg.audio} duration={msg.duration} />
+                )}
                 {msg.file && (
                   <div className="flex items-center gap-3 p-2 bg-white/10 rounded-2xl border border-white/5">
                     <div className="w-10 h-10 rounded-xl bg-indigo-500/20 flex items-center justify-center text-indigo-400">
@@ -436,37 +673,76 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
       </main>
 
       <footer className="fixed bottom-0 left-0 right-0 h-20 bg-slate-900/40 backdrop-blur-2xl border-t border-white/5 px-4 flex items-center gap-3 z-50 shadow-2xl">
-        <button className="text-slate-500 active:scale-95"><Smile className="w-6 h-6" /></button>
-        <div className="flex-1 relative">
-          <input 
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            disabled={isUploading}
-            className="w-full bg-white/5 border border-white/10 rounded-full py-3 px-5 text-sm font-medium text-white placeholder-slate-500 focus:ring-1 focus:ring-indigo-500/50 outline-none disabled:opacity-50" 
-            placeholder={isUploading ? "Enviando arquivo..." : "Digite sua mensagem..."} 
-          />
-          <input 
-            type="file" 
-            ref={fileInputRef} 
-            className="hidden" 
-            onChange={handleFileUpload} 
-          />
-          <button 
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isUploading}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-indigo-400 transition-colors disabled:opacity-50"
+        {!isRecording && <button className="text-slate-500 active:scale-95"><Smile className="w-6 h-6" /></button>}
+        
+        {isRecording ? (
+          <motion.div 
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="flex-1 flex items-center justify-between bg-white/5 border border-red-500/30 rounded-full py-2 px-4 shadow-[0_0_15px_rgba(239,68,68,0.1)]"
           >
-            {isUploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Paperclip className="w-5 h-5" />}
+            <div className="flex items-center gap-3">
+              <div className="w-3 h-3 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]" />
+              <span className="text-sm font-bold text-red-100">{formatDuration(recordingDuration)}</span>
+            </div>
+            <button 
+              onClick={cancelRecording}
+              className="text-slate-400 hover:text-red-400 transition-colors p-2"
+            >
+              Cancelar
+            </button>
+          </motion.div>
+        ) : (
+          <div className="flex-1 relative">
+            <input 
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+              disabled={isUploading}
+              className="w-full bg-white/5 border border-white/10 rounded-full py-3 px-5 text-sm font-medium text-white placeholder-slate-500 focus:ring-1 focus:ring-indigo-500/50 outline-none disabled:opacity-50" 
+              placeholder={isUploading ? "Enviando arquivo..." : "Digite sua mensagem..."} 
+            />
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              className="hidden" 
+              onChange={handleFileUpload} 
+            />
+            <button 
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-indigo-400 transition-colors disabled:opacity-50"
+            >
+              {isUploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Paperclip className="w-5 h-5" />}
+            </button>
+          </div>
+        )}
+
+        {inputText.trim() || isRecording ? (
+          <button 
+            onClick={isRecording ? stopRecording : handleSend}
+            className={`w-12 h-12 rounded-full flex items-center justify-center shadow-primary-glow active:scale-90 transition-transform ${isRecording ? 'bg-red-500 text-white shadow-[0_0_15px_rgba(239,68,68,0.4)]' : 'bg-indigo-500 text-white'}`}
+          >
+            {isRecording ? <Square className="w-5 h-5 fill-current" /> : <Send className="w-5 h-5 fill-current" />}
           </button>
-        </div>
-        <button 
-          onClick={handleSend}
-          className="w-12 h-12 bg-indigo-500 text-white rounded-full flex items-center justify-center shadow-primary-glow active:scale-90 transition-transform"
-        >
-          <Send className="w-5 h-5 fill-current" />
-        </button>
+        ) : (
+          <button 
+            onClick={startRecording}
+            className="w-12 h-12 bg-indigo-500 text-white rounded-full flex items-center justify-center shadow-primary-glow active:scale-90 transition-transform"
+          >
+            <Mic className="w-5 h-5 fill-current" />
+          </button>
+        )}
       </footer>
+
+      {activeCall && (
+        <CallScreen 
+          chatId={chatId} 
+          isReceiving={activeCall.isReceiving} 
+          isVideo={activeCall.isVideo}
+          onEndCall={() => setActiveCall(null)} 
+        />
+      )}
     </div>
   );
 };

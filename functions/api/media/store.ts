@@ -10,7 +10,11 @@ export const onRequestPost = async (context) => {
     }
 
     if (!env.R2_BUCKET) {
-      return new Response(JSON.stringify({ error: 'Bucket R2 não configurado nas variáveis de ambiente.' }), { status: 500 });
+      return new Response(JSON.stringify({ error: 'Associação R2_BUCKET não encontrada. Verifique a aba "Associações" no painel da Cloudflare.' }), { status: 500 });
+    }
+
+    if (!env.R2_PUBLIC_DOMAIN) {
+      return new Response(JSON.stringify({ error: 'Variável R2_PUBLIC_DOMAIN não encontrada. Verifique a aba "Configurações > Variáveis" no painel da Cloudflare.' }), { status: 500 });
     }
 
     const key = `uploads/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;

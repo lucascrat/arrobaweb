@@ -29,10 +29,12 @@ export async function uploadToR2(file: File): Promise<string> {
   });
 
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({ error: 'Unknown upload error' }));
-    throw new Error(errorData.error || 'Falha ao fazer upload para o Cloudflare R2.');
+    const errorData = await response.json().catch(() => ({ error: 'Erro desconhecido no servidor' }));
+    console.error('R2 Upload Failure:', errorData);
+    throw new Error(errorData.error || `Erro ${response.status}: Falha ao fazer upload para o Cloudflare R2.`);
   }
 
-  const { publicUrl } = await response.json();
-  return publicUrl;
+  const data = await response.json();
+  console.log('R2 Upload Success:', data);
+  return data.publicUrl;
 }

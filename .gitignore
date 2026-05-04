@@ -6,3 +6,7 @@ coverage/
 *.log
 .env*
 !.env.example
+.agent/
+.firebase/
+.vscode/
+arroba.apk

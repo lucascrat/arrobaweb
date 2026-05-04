@@ -21,10 +21,9 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ setScreen, setSelect
     let isCancelled = false;
 
     const performSearch = async () => {
-      const exactTerm = searchTerm.trim().replace(/^@/, '');
-      const sanitizedTerm = exactTerm.toLowerCase().replace(/[^a-z0-9_]/g, '');
+      const cleanTerm = searchTerm.trim().replace(/^@/, '').toLowerCase().replace(/[^a-z0-9_]/g, '');
       
-      if (exactTerm.length <= 1) {
+      if (cleanTerm.length <= 1) {
         setResults([]);
         setLoading(false);
         return;
@@ -32,77 +31,22 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ setScreen, setSelect
 
       setLoading(true);
       try {
-        const queries = [];
-        
-        // Always search exact term length > 1
-        queries.push(
-          query(
-            collection(db, 'users'),
-            where('username', '>=', exactTerm),
-            where('username', '<=', exactTerm + '\uf8ff'),
-            limit(10)
-          )
+        const q = query(
+          collection(db, 'users'),
+          where('username', '>=', cleanTerm),
+          where('username', '<=', cleanTerm + '\uf8ff'),
+          limit(20)
         );
 
-        // If sanitized term is different and valid, search it too
-        if (sanitizedTerm !== exactTerm && sanitizedTerm.length > 1) {
-          queries.push(
-            query(
-              collection(db, 'users'),
-              where('username', '>=', sanitizedTerm),
-              where('username', '<=', sanitizedTerm + '\uf8ff'),
-              limit(10)
-            )
-          );
-        }
-
-        // Search by displayName as well, just in case
-        queries.push(
-          query(
-            collection(db, 'users'),
-            where('displayName', '>=', exactTerm),
-            where('displayName', '<=', exactTerm + '\uf8ff'),
-            limit(10)
-          )
-        );
-
-        // First letter capitalized search (common case)
-        const capitalizedTerm = exactTerm.charAt(0).toUpperCase() + exactTerm.slice(1).toLowerCase();
-        if (capitalizedTerm !== exactTerm && capitalizedTerm.length > 1) {
-          queries.push(
-            query(
-              collection(db, 'users'),
-              where('username', '>=', capitalizedTerm),
-              where('username', '<=', capitalizedTerm + '\uf8ff'),
-              limit(10)
-            )
-          );
-        }
-        
-        // Same for all uppercase (common case)
-        const upperTerm = exactTerm.toUpperCase();
-        if (upperTerm !== exactTerm && upperTerm.length > 1) {
-          queries.push(
-            query(
-              collection(db, 'users'),
-              where('username', '>=', upperTerm),
-              where('username', '<=', upperTerm + '\uf8ff'),
-              limit(10)
-            )
-          );
-        }
-
-        const snapshots = await Promise.all(queries.map(q => getDocs(q)));
+        const querySnapshot = await getDocs(q);
         
         if (!isCancelled) {
           const allUsers: any[] = [];
-          snapshots.forEach(querySnapshot => {
-            querySnapshot.docs.forEach(doc => {
-              const data = doc.data();
-              if (doc.id !== user?.uid && !allUsers.find(u => u.id === doc.id)) {
-                allUsers.push({ id: doc.id, ...(data as any) });
-              }
-            });
+          querySnapshot.forEach(doc => {
+            const data = doc.data();
+            if (doc.id !== user?.uid) {
+              allUsers.push({ id: doc.id, ...(data as any) });
+            }
           });
           setResults(allUsers);
         }

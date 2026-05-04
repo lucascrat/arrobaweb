@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "291416115748",
+    "project_id": "gen-lang-client-0341793810",
+    "storage_bucket": "gen-lang-client-0341793810.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:291416115748:android:ac315c8d8601cccd0ce6b1",
+        "android_client_info": {
+          "package_name": "com.arroba.messenger"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "291416115748-lku7r80n5huihvjjk3k11i92hklftd3k.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyASy2JPG7KyCaWsPOOINp22PFfQzxMbGVA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "291416115748-79d8cc7mbdt64c3kbsliif1b0c4h24a4.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

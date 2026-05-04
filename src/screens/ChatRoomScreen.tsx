@@ -350,6 +350,20 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
         lastMessageAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
+
+      // Trigger Push Notification for the recipient
+      if (chatInfo && !chatInfo.isGroup) {
+        const otherId = chatInfo.participants?.find((id: string) => id !== user.uid);
+        if (otherId) {
+          const { sendPushNotification } = await import('../lib/notifications');
+          sendPushNotification(
+            otherId, 
+            profile?.username || 'Nova Mensagem', 
+            text,
+            { chatId }
+          );
+        }
+      }
     } catch (error) {
       console.error("Error sending message:", error);
       setErrorMessage("Erro ao enviar mensagem. Tente novamente.");
@@ -389,6 +403,20 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
           lastMessageAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         });
+
+        // Trigger Push Notification
+        if (chatInfo && !chatInfo.isGroup) {
+          const otherId = chatInfo.participants?.find((id: string) => id !== user.uid);
+          if (otherId) {
+            const { sendPushNotification } = await import('../lib/notifications');
+            sendPushNotification(
+              otherId, 
+              profile?.username || 'Nova Mensagem', 
+              `Enviou um(a) ${contentType}`,
+              { chatId }
+            );
+          }
+        }
 
         soundManager.playSent();
       } catch (fsError) {
@@ -473,6 +501,20 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
               lastMessageAt: serverTimestamp(),
               updatedAt: serverTimestamp()
             });
+
+            // Trigger Push Notification
+            if (chatInfo && !chatInfo.isGroup) {
+              const otherId = chatInfo.participants?.find((id: string) => id !== user.uid);
+              if (otherId) {
+                const { sendPushNotification } = await import('../lib/notifications');
+                sendPushNotification(
+                  otherId, 
+                  profile?.username || 'Nova Mensagem', 
+                  `🎤 Mensagem de áudio`,
+                  { chatId }
+                );
+              }
+            }
 
             soundManager.playSent();
           } catch (fsError) {

@@ -64,3 +64,27 @@ export const setupPushNotifications = async (userId: string) => {
     }
   }
 };
+export const sendPushNotification = async (recipientId: string, title: string, body: string, data?: any) => {
+  try {
+    // 1. Get recipient token from Firestore
+    const userSnap = await getDoc(doc(db, 'users', recipientId));
+    if (!userSnap.exists()) return;
+    
+    const { fcmToken } = userSnap.data();
+    if (!fcmToken) return;
+
+    // 2. Call Cloudflare Function to send the push
+    await fetch('/api/notifications/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        recipientToken: fcmToken,
+        title,
+        body,
+        data
+      })
+    });
+  } catch (error) {
+    console.error('Failed to send push notification:', error);
+  }
+};

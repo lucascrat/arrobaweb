@@ -29,9 +29,9 @@ export async function uploadToR2(file: File): Promise<string> {
   });
 
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({ error: 'Erro desconhecido no servidor' }));
-    console.error('R2 Upload Failure:', errorData);
-    throw new Error(errorData.error || `Erro ${response.status}: Falha ao fazer upload para o Cloudflare R2.`);
+    const errorText = await response.text().catch(() => 'Erro totalmente desconhecido');
+    console.error('R2 Upload Failure Raw:', errorText);
+    throw new Error(errorText || `Erro ${response.status}: Falha no servidor Cloudflare.`);
   }
 
   const data = await response.json();

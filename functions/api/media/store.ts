@@ -2,35 +2,34 @@ export const onRequestPost = async (context) => {
   const { request, env } = context;
 
   try {
+    // Log básico para diagnóstico
+    console.log("Iniciando processamento de upload...");
+
+    if (!env.R2_BUCKET) {
+      return new Response("ERRO: Associação R2_BUCKET não encontrada no ambiente.", { status: 500 });
+    }
+
     const formData = await request.formData();
     const file = formData.get('file');
 
     if (!file || !(file instanceof File)) {
-      return new Response(JSON.stringify({ error: 'Nenhum arquivo enviado' }), { status: 400 });
-    }
-
-    if (!env.R2_BUCKET) {
-      return new Response(JSON.stringify({ error: 'Associação R2_BUCKET não encontrada. Verifique a aba "Associações" no painel da Cloudflare.' }), { status: 500 });
-    }
-
-    if (!env.R2_PUBLIC_DOMAIN) {
-      return new Response(JSON.stringify({ error: 'Variável R2_PUBLIC_DOMAIN não encontrada. Verifique a aba "Configurações > Variáveis" no painel da Cloudflare.' }), { status: 500 });
+      return new Response("ERRO: Nenhum arquivo válido enviado.", { status: 400 });
     }
 
     const key = `uploads/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
     
-    // Upload para o R2 usando o binding nativo
+    // Upload direto
     await env.R2_BUCKET.put(key, file.stream(), {
       httpMetadata: { contentType: file.type },
     });
 
     const publicUrl = `${env.R2_PUBLIC_DOMAIN}/${key}`;
 
-    return new Response(JSON.stringify({ publicUrl, key }), {
+    return new Response(JSON.stringify({ publicUrl }), {
       headers: { 'Content-Type': 'application/json' }
     });
+
   } catch (error) {
-    console.error('Erro no upload R2:', error);
-    return new Response(JSON.stringify({ error: 'Falha interna no upload' }), { status: 500 });
+    return new Response(`ERRO CRÍTICO: ${error.message}`, { status: 500 });
   }
 };

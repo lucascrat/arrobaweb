@@ -25,7 +25,12 @@ export const CallScreen: React.FC<CallScreenProps> = ({ chatId, isReceiving, isV
   useEffect(() => {
     if (!user) return;
     
-    soundManager.playClick();
+    // Start appropriate sound
+    if (isReceiving) {
+      soundManager.playRingtone();
+    } else {
+      soundManager.playCalling();
+    }
     
     const client = new CallsClient(
       chatId, 
@@ -37,6 +42,8 @@ export const CallScreen: React.FC<CallScreenProps> = ({ chatId, isReceiving, isV
       },
       () => {
         // Connected!
+        soundManager.stopAll(); // Stop calling/ringtone sound
+        soundManager.playSent(); // Quick feedback chime
         setCallDuration(0);
         timerRef.current = setInterval(() => {
           setCallDuration(prev => (prev !== null ? prev + 1 : 0));
@@ -52,6 +59,7 @@ export const CallScreen: React.FC<CallScreenProps> = ({ chatId, isReceiving, isV
     }
 
     return () => {
+      soundManager.stopAll(); // Ensure sounds stop on unmount
       if (timerRef.current) clearInterval(timerRef.current);
       client.endCall();
     };

@@ -1,11 +1,12 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
 import { getMessaging, isSupported } from 'firebase/messaging';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId); // Use the specific databaseId from config
+// Note: persistence is removed to avoid "Operation not supported" errors in certain environments
+export const db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId); 
 export const auth = getAuth(app);
 
 export const getMessagingSafe = async () => {

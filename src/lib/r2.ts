@@ -16,19 +16,23 @@ export async function getR2PresignedUrl(fileName: string, fileType: string): Pro
 }
 
 export async function uploadToR2(file: File): Promise<string> {
-  const { presignedUrl, publicUrl } = await getR2PresignedUrl(file.name, file.type);
+  const formData = new FormData();
+  // Safari can throw "The string did not match the expected pattern" on formData.append with custom filename
+  // Let's use a safe File instance instead
+  const safeName = file.name ? file.name.replace(/[^\x00-\x7F]/g, '_') : 'upload';
+  const safeFile = new File([file], safeName || 'file', { type: file.type || 'application/octet-stream' });
+  formData.append('file', safeFile);
 
-  const uploadResponse = await fetch(presignedUrl, {
-    method: 'PUT',
-    body: file,
-    headers: {
-      'Content-Type': file.type,
-    },
+  const response = await fetch('/api/media/store', {
+    method: 'POST',
+    body: formData,
   });
 
-  if (!uploadResponse.ok) {
-    throw new Error('Falha ao fazer upload para o Cloudflare R2.');
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: 'Unknown upload error' }));
+    throw new Error(errorData.error || 'Falha ao fazer upload para o Cloudflare R2.');
   }
 
+  const { publicUrl } = await response.json();
   return publicUrl;
 }

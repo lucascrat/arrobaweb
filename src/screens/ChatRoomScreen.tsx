@@ -173,74 +173,91 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
           setTypingUsers([]);
         }
       }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, `chats/${chatId}`);
     });
 
-    // Load messages
-    const msgsQuery = query(
-      collection(db, 'chats', chatId, 'messages'),
-      orderBy('createdAt', 'asc')
-    );
+    // Load messages - Only start if chatInfo is available to avoid permission errors on non-existing chats
+    let unsubMsgs = () => {};
+    if (chatInfo) {
+      const msgsQuery = query(
+        collection(db, 'chats', chatId, 'messages'),
+        orderBy('createdAt', 'asc')
+      );
 
-    let isFirstLoadMsgs = true;
+      let isFirstLoadMsgs = true;
 
-    const unsubMsgs = onSnapshot(msgsQuery, (snapshot) => {
-      const newMsgs = snapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          ...data,
-          type: data.senderId === user?.uid ? 'sent' : 'received',
-          time: data.createdAt?.toDate()?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) || '...'
-        } as any;
-      });
-      setMessages(newMsgs);
+      unsubMsgs = onSnapshot(msgsQuery, (snapshot) => {
+        const newMsgs = snapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            ...data,
+            type: data.senderId === user?.uid ? 'sent' : 'received',
+            time: data.createdAt?.toDate()?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) || '...'
+          } as any;
+        });
+        setMessages(newMsgs);
 
-      if (!isFirstLoadMsgs) {
-        snapshot.docChanges().forEach((change) => {
-          if (change.type === 'added') {
-            const addedMsg = change.doc.data();
-            if (addedMsg.senderId !== user?.uid) {
-              soundManager.playChime();
-              
-              const isMentioned = addedMsg.text?.includes(`@${profile?.username}`);
-              
-              if (profile?.notificationSettings?.pushEnabled !== false) {
-                if (document.hidden || isMentioned) {
-                  if (Notification.permission === 'granted') {
-                    const chatName = chatInfoRef.current?.name || chatInfoRef.current?.username || 'Nova Mensagem';
-                    new Notification(isMentioned ? `MENCIONADO em ${chatName}` : chatName, {
-                      body: addedMsg.text || 'Nova mensagem de voz ou arquivo',
-                      icon: chatInfoRef.current?.avatar
-                    });
+        if (!isFirstLoadMsgs) {
+          snapshot.docChanges().forEach((change) => {
+            if (change.type === 'added') {
+              const addedMsg = change.doc.data();
+              if (addedMsg.senderId !== user?.uid) {
+                soundManager.playChime();
+                
+                const isMentioned = addedMsg.text?.includes(`@${profile?.username}`);
+                
+                if (profile?.notificationSettings?.pushEnabled !== false) {
+                  let canNotify = false;
+                  try {
+                    canNotify = 'Notification' in window && Notification.permission === 'granted';
+                  } catch(e) {}
+                  if ((document.hidden || isMentioned) && canNotify) {
+                      try {
+                        const chatName = chatInfoRef.current?.name || chatInfoRef.current?.username || 'Nova Mensagem';
+                        new Notification(isMentioned ? `MENCIONADO em ${chatName}` : chatName, {
+                          body: addedMsg.text || 'Nova mensagem de voz ou arquivo',
+                          icon: chatInfoRef.current?.avatar
+                        });
+                      } catch (e) {
+                        console.warn('Notifications not supported in this environment', e);
+                      }
                   }
                 }
               }
             }
-          }
-        });
-      }
-      isFirstLoadMsgs = false;
-    });
+          });
+        }
+        isFirstLoadMsgs = false;
+      }, (error) => {
+        handleFirestoreError(error, OperationType.LIST, `chats/${chatId}/messages`);
+      });
+    }
 
     // Listen for Incoming Calls
-    const callRef = doc(collection(db, 'calls'), chatId);
+    const callRef = doc(db, 'calls', chatId);
     const unsubCall = onSnapshot(callRef, (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.data();
         if (data.callerId && data.callerId !== user.uid && !data.endedAt) {
           // It's an incoming call!
-          // We could play a ringtone here.
           setActiveCall({ isReceiving: true, isVideo: data.isVideo });
         }
+      }
+    }, (error) => {
+      // Ignore permission errors for non-existent call docs
+      if (error.code !== 'permission-denied') {
+        handleFirestoreError(error, OperationType.GET, `calls/${chatId}`);
       }
     });
 
     return () => {
       unsubChat();
-      unsubMsgs();
+      if (unsubMsgs) unsubMsgs();
       unsubCall();
     };
-  }, [chatId, user]);
+  }, [chatId, user, chatInfo ? true : false]); // Re-run when chatInfo exists
 
   const startCall = (isVideo: boolean) => {
     setActiveCall({ isReceiving: false, isVideo });
@@ -263,35 +280,48 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
           avatar: data.photoURL || `https://ui-avatars.com/api/?name=${data.username}`
         });
       }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, `users/${otherId}`);
     });
 
     return () => unsubOther();
   }, [chatInfo?.id, user?.uid]);
 
   // Typing status update logic
+  const lastTypingUpdateRef = useRef<number>(0);
   useEffect(() => {
-    if (!chatId || !user || !inputText) {
-      if (chatId && user && typingTimeoutRef.current) {
-        // Clear immediately if input is empty
-        const chatRef = doc(db, 'chats', chatId);
+    if (!chatId || !user) return;
+
+    const chatRef = doc(db, 'chats', chatId);
+
+    if (!inputText) {
+      if (lastTypingUpdateRef.current > 0) {
         updateDoc(chatRef, {
           [`typing.${user.uid}`]: deleteField()
         }).catch(err => console.error("Error clearing typing state:", err));
+        lastTypingUpdateRef.current = 0;
       }
       return;
     }
 
-    const chatRef = doc(db, 'chats', chatId);
-    updateDoc(chatRef, {
-      [`typing.${user.uid}`]: serverTimestamp()
-    }).catch(err => console.error("Error setting typing state:", err));
+    const now = Date.now();
+    if (now - lastTypingUpdateRef.current > 3000) { // Update every 3 seconds while typing
+      updateDoc(chatRef, {
+        [`typing.${user.uid}`]: serverTimestamp()
+      }).catch(err => console.error("Error setting typing state:", err));
+      lastTypingUpdateRef.current = now;
+    }
 
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
 
     typingTimeoutRef.current = setTimeout(() => {
       updateDoc(chatRef, {
         [`typing.${user.uid}`]: deleteField()
-      }).catch(err => console.error("Error clearing typing state:", err));
+      }).catch(err => {
+        // If chat was deleted or permissions changed, ignore
+        if (err.code !== 'permission-denied') console.error("Error clearing typing state:", err);
+      });
+      lastTypingUpdateRef.current = 0;
     }, 5000);
 
     return () => {
@@ -342,24 +372,29 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
       const fileCategory = file.type.split('/')[0];
       const contentType = fileCategory === 'image' ? 'image' : (fileCategory === 'video' ? 'video' : 'file');
       
-      await addDoc(collection(db, 'chats', chatId, 'messages'), {
-        senderId: user.uid,
-        [contentType]: publicUrl,
-        contentType,
-        fileName: file.name,
-        fileSize: file.size,
-        createdAt: serverTimestamp(),
-        status: 'sent',
-        avatar: profile?.photoURL || user.photoURL
-      });
+      try {
+        await addDoc(collection(db, 'chats', chatId, 'messages'), {
+          senderId: user.uid,
+          [contentType]: publicUrl,
+          contentType,
+          fileName: file.name,
+          fileSize: file.size,
+          createdAt: serverTimestamp(),
+          status: 'sent',
+          avatar: profile?.photoURL || user.photoURL
+        });
 
-      await updateDoc(doc(db, 'chats', chatId), {
-        lastMessage: `Arquivo: ${file.name}`,
-        lastMessageAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      });
+        await updateDoc(doc(db, 'chats', chatId), {
+          lastMessage: `Arquivo: ${file.name}`,
+          lastMessageAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
 
-      soundManager.playSent();
+        soundManager.playSent();
+      } catch (fsError) {
+        console.error("Firestore error after file upload:", fsError);
+        handleFirestoreError(fsError, OperationType.CREATE, `chats/${chatId}/messages`);
+      }
     } catch (error) {
       console.error("Upload error:", error);
       setErrorMessage("Falha no upload do arquivo. Verifique sua conexão.");
@@ -420,35 +455,44 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
         try {
           const publicUrl = await uploadToR2(audioFile);
           
-          await addDoc(collection(db, 'chats', chatId!, 'messages'), {
-            senderId: user.uid,
-            audio: publicUrl,
-            contentType: 'audio',
-            fileName: audioFile.name,
-            fileSize: audioFile.size,
-            duration: Math.max(1, Math.round(finalDuration)),
-            createdAt: serverTimestamp(),
-            status: 'sent',
-            avatar: profile?.photoURL || user.photoURL
-          });
+          try {
+            await addDoc(collection(db, 'chats', chatId!, 'messages'), {
+              senderId: user.uid,
+              audio: publicUrl,
+              contentType: 'audio',
+              fileName: audioFile.name,
+              fileSize: audioFile.size,
+              duration: Math.max(1, Math.round(finalDuration)),
+              createdAt: serverTimestamp(),
+              status: 'sent',
+              avatar: profile?.photoURL || user.photoURL
+            });
 
-          await updateDoc(doc(db, 'chats', chatId!), {
-            lastMessage: `🎤 Áudio`,
-            lastMessageAt: serverTimestamp(),
-            updatedAt: serverTimestamp()
-          });
+            await updateDoc(doc(db, 'chats', chatId!), {
+              lastMessage: `🎤 Áudio`,
+              lastMessageAt: serverTimestamp(),
+              updatedAt: serverTimestamp()
+            });
 
-          soundManager.playSent();
+            soundManager.playSent();
+          } catch (fsError) {
+            console.error("Firestore error after audio upload:", fsError);
+            handleFirestoreError(fsError, OperationType.CREATE, `chats/${chatId}/messages`);
+          }
         } catch (error) {
            console.error("Audio Upload error:", error);
-           setErrorMessage("Erro ao enviar áudio.");
-           handleFirestoreError(error, OperationType.CREATE, `chats/${chatId}/messages`);
+           setErrorMessage("Erro ao enviar áudio. Verifique sua conexão.");
+           // Do NOT call handleFirestoreError here as it's not a Firestore error
         } finally {
            setIsUploading(false);
         }
       };
 
-      mediaRecorder.start(100);
+      try {
+        mediaRecorder.start(200);
+      } catch (err: any) {
+        mediaRecorder.start(); // Fallback for browsers that don't support timeslice like Safari
+      }
       setIsRecording(true);
       recordingDurationRef.current = 0;
       soundManager.playClick();

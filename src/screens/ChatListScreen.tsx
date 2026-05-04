@@ -35,10 +35,16 @@ export const ChatListScreen: React.FC<ChatListScreenProps> = ({ setScreen, setSe
       snapshot.docChanges().forEach((change) => {
         if (change.type === 'modified' && !snapshot.metadata.hasPendingWrites) {
           const data = change.doc.data();
-          if (document.hidden && Notification.permission === 'granted') {
-            new Notification('Soberania App: Nova Mensagem', {
-              body: data.lastMessage || 'Você recebeu uma nova mensagem'
-            });
+          let canNotify = false;
+          try {
+            canNotify = 'Notification' in window && Notification.permission === 'granted';
+          } catch(e) {}
+          if (document.hidden && canNotify) {
+            try {
+              new Notification('Soberania App: Nova Mensagem', {
+                body: data.lastMessage || 'Você recebeu uma nova mensagem'
+              });
+            } catch(e) {}
           }
           soundManager.playClick();
         }

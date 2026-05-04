@@ -13,6 +13,10 @@ service cloud.firestore {
     function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
     function incoming() { return request.resource.data; }
     function existing() { return resource.data; }
+    
+    function isParticipant(chatId) {
+      return isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+    }
 
     // User Rules
     match /users/{userId} {
@@ -49,17 +53,25 @@ service cloud.firestore {
                     (!incoming().isGroup || (incoming().groupName is string && incoming().groupName.size() >= 3));
       
       allow update: if isSignedIn() && request.auth.uid in existing().participants && (
-        incoming().diff(existing()).affectedKeys().hasOnly(['lastMessage', 'lastMessageAt', 'updatedAt', 'groupName', 'groupAvatar'])
+        incoming().diff(existing()).affectedKeys().hasOnly(['lastMessage', 'lastMessageAt', 'updatedAt', 'groupName', 'groupAvatar', 'typing'])
       );
 
       match /messages/{messageId} {
-        allow read: if isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
-        allow create: if isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants &&
+        allow read: if isParticipant(chatId);
+        allow create: if isParticipant(chatId) &&
                       incoming().senderId == request.auth.uid &&
                       incoming().createdAt == request.time;
-        allow update: if isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants &&
+        allow update: if isParticipant(chatId) &&
                       incoming().diff(existing()).affectedKeys().hasOnly(['reactions', 'status']);
       }
+    }
+
+    // Call Rules
+    match /calls/{chatId} {
+      allow read: if isParticipant(chatId);
+      allow create: if isParticipant(chatId);
+      allow update: if isParticipant(chatId);
+      allow delete: if isParticipant(chatId);
     }
   }
 }

@@ -276,8 +276,15 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ setScreen }) => {
                   const current = profile?.notificationSettings?.pushEnabled ?? true;
                   soundManager.playClick();
                   
-                  if (!current && 'Notification' in window && Notification.permission !== 'granted') {
-                    await Notification.requestPermission();
+                  let canRequest = false;
+                  try {
+                    canRequest = !current && 'Notification' in window && Notification.permission !== 'granted';
+                  } catch(e) {}
+                  
+                  if (canRequest) {
+                    try {
+                      await Notification.requestPermission();
+                    } catch(e) {}
                   }
 
                   if (user) {

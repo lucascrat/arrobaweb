@@ -151,6 +151,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ setScreen, setSelect
       setScreen('chat-room');
     } catch (error) {
       console.error("Error starting chat:", error);
+      // Using handleFirestoreError here might be good if it's imported
     } finally {
       setLoading(false);
     }

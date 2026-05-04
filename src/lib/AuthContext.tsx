@@ -76,42 +76,54 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // Push Notification Registration
         const setupMessaging = async () => {
-          const messaging = await getMessagingSafe();
-          if (messaging && 'Notification' in window) {
-            const permission = await Notification.requestPermission();
-            if (permission === 'granted') {
-              try {
-                // Register Service Worker explicitly
-                const registration = await navigator.serviceWorker.register('/sw.js');
-                const token = await getToken(messaging, { 
-                  serviceWorkerRegistration: registration,
-                });
-                
-                if (token) {
-                  try {
-                    await updateDoc(userRef, { fcmToken: token });
-                  } catch (err) {
-                    handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
+          try {
+            const messaging = await getMessagingSafe();
+            if (messaging && 'Notification' in window) {
+              const permission = await Notification.requestPermission();
+              if (permission === 'granted') {
+                try {
+                  // Register Service Worker explicitly
+                  if ('serviceWorker' in navigator) {
+                    const registration = await navigator.serviceWorker.register('/sw.js');
+                    const token = await getToken(messaging, { 
+                      serviceWorkerRegistration: registration,
+                    });
+                    
+                    if (token) {
+                      try {
+                        await updateDoc(userRef, { fcmToken: token });
+                      } catch (err) {
+                        handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
+                      }
+                    }
+
+                    onMessage(messaging, (payload) => {
+                      console.log('Message received. ', payload);
+                      
+                      // Respect push setting
+                      if (profileRef.current?.notificationSettings?.pushEnabled === false) {
+                        return;
+                      }
+
+                      if ('Notification' in window && Notification.permission === 'granted') {
+                        try {
+                          new Notification(payload.notification?.title || 'Novo Alerta', {
+                            body: payload.notification?.body,
+                            icon: profileRef.current?.photoURL
+                          });
+                        } catch(e) {
+                          console.warn('Could not show notification', e);
+                        }
+                      }
+                    });
                   }
+                } catch (err) {
+                  console.warn("FCM registration skipped or failed:", err);
                 }
-
-                onMessage(messaging, (payload) => {
-                  console.log('Message received. ', payload);
-                  
-                  // Respect push setting
-                  if (profileRef.current?.notificationSettings?.pushEnabled === false) {
-                    return;
-                  }
-
-                  new Notification(payload.notification?.title || 'Novo Alerta', {
-                    body: payload.notification?.body,
-                    icon: profileRef.current?.photoURL
-                  });
-                });
-              } catch (err) {
-                console.warn("FCM registration skipped or failed:", err);
               }
             }
+          } catch (e) {
+             console.warn("Messaging is not supported or failed to init", e);
           }
         };
 

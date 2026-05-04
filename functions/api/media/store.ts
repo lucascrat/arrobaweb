@@ -2,11 +2,8 @@ export const onRequestPost = async (context) => {
   const { request, env } = context;
 
   try {
-    // Log básico para diagnóstico
-    console.log("Iniciando processamento de upload...");
-
     if (!env.R2_BUCKET) {
-      return new Response("ERRO: Associação R2_BUCKET não encontrada no ambiente.", { status: 500 });
+      return new Response("ERRO: Associação R2_BUCKET não encontrada.", { status: 500 });
     }
 
     const formData = await request.formData();
@@ -18,12 +15,20 @@ export const onRequestPost = async (context) => {
 
     const key = `uploads/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
     
-    // Upload direto
     await env.R2_BUCKET.put(key, file.stream(), {
       httpMetadata: { contentType: file.type },
     });
 
-    const publicUrl = `${env.R2_PUBLIC_DOMAIN}/${key}`;
+    // Garantir que o domínio não tenha barra no final e tenha o protocolo
+    let domain = (env.R2_PUBLIC_DOMAIN || '').trim();
+    if (domain.endsWith('/')) {
+      domain = domain.slice(0, -1);
+    }
+    if (domain && !domain.startsWith('http')) {
+      domain = `https://${domain}`;
+    }
+
+    const publicUrl = `${domain}/${key}`;
 
     return new Response(JSON.stringify({ publicUrl }), {
       headers: { 'Content-Type': 'application/json' }

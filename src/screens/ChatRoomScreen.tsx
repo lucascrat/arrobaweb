@@ -125,6 +125,7 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const recordingDurationRef = useRef<number>(0);
   const recordingStartTimeRef = useRef<number>(0);
+  const isInitializingRecordingRef = useRef<boolean>(false);
   const chatInfoRef = useRef<any>(null);
 
   useEffect(() => {
@@ -370,8 +371,13 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
   };
 
   const startRecording = async () => {
+    if (isInitializingRecordingRef.current || isRecording) return;
+    isInitializingRecordingRef.current = true;
+    
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recordingStartTimeRef.current = Date.now();
+      
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
@@ -383,16 +389,19 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
       };
 
       mediaRecorder.onstop = async () => {
-        const finalDuration = (Date.now() - recordingStartTimeRef.current) / 1000;
+        const now = Date.now();
+        const finalDuration = (now - recordingStartTimeRef.current) / 1000;
         
-        if (finalDuration < 0.5) {
-          // Recording too short, don't send
+        // Defensive check: if duration logic fails or is too short
+        if (finalDuration < 0.2 && audioChunksRef.current.length === 0) {
+          // Recording truly too short and no data
           stream.getTracks().forEach(track => track.stop());
           clearInterval(recordingTimerRef.current as NodeJS.Timeout);
           setRecordingDuration(0);
           recordingDurationRef.current = 0;
           setIsRecording(false);
           setErrorMessage("Gravação muito curta.");
+          soundManager.playAlert();
           return;
         }
 
@@ -417,7 +426,7 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
             contentType: 'audio',
             fileName: audioFile.name,
             fileSize: audioFile.size,
-            duration: Math.round(finalDuration),
+            duration: Math.max(1, Math.round(finalDuration)),
             createdAt: serverTimestamp(),
             status: 'sent',
             avatar: profile?.photoURL || user.photoURL
@@ -439,9 +448,8 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
         }
       };
 
-      mediaRecorder.start();
+      mediaRecorder.start(100);
       setIsRecording(true);
-      recordingStartTimeRef.current = Date.now();
       recordingDurationRef.current = 0;
       soundManager.playClick();
       
@@ -455,6 +463,9 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
     } catch (error) {
       console.error("Error accessing microphone:", error);
       setErrorMessage("Permissão de microfone negada ou não suportada nesta versão.");
+      soundManager.playAlert();
+    } finally {
+      isInitializingRecordingRef.current = false;
     }
   };
 

@@ -21,51 +21,61 @@ export const CallScreen: React.FC<CallScreenProps> = ({ chatId, isReceiving, isV
   const [isVideoOff, setIsVideoOff] = useState(!isVideo);
   const [callDuration, setCallDuration] = useState<number | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const [hasAccepted, setHasAccepted] = useState(!isReceiving);
 
   useEffect(() => {
     if (!user) return;
     
     // Start appropriate sound
-    if (isReceiving) {
+    if (isReceiving && !hasAccepted) {
       soundManager.playRingtone();
-    } else {
+    } else if (!isReceiving) {
       soundManager.playCalling();
     }
     
-    const client = new CallsClient(
-      chatId, 
-      user.uid, 
-      (remoteStream) => {
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = remoteStream;
+    // Only start WebRTC logic if it's an outgoing call OR an accepted incoming call
+    if (!isReceiving || hasAccepted) {
+      const client = new CallsClient(
+        chatId, 
+        user.uid, 
+        (remoteStream) => {
+          if (remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = remoteStream;
+          }
+        },
+        () => {
+          // Connected!
+          soundManager.stopAll();
+          soundManager.playSent();
+          setCallDuration(0);
+          timerRef.current = setInterval(() => {
+            setCallDuration(prev => (prev !== null ? prev + 1 : 0));
+          }, 1000);
         }
-      },
-      () => {
-        // Connected!
-        soundManager.stopAll(); // Stop calling/ringtone sound
-        soundManager.playSent(); // Quick feedback chime
-        setCallDuration(0);
-        timerRef.current = setInterval(() => {
-          setCallDuration(prev => (prev !== null ? prev + 1 : 0));
-        }, 1000);
-      }
-    );
-    clientRef.current = client;
+      );
+      clientRef.current = client;
 
-    if (isReceiving) {
-      client.answerCall(localVideoRef.current as HTMLVideoElement, isVideo);
-    } else {
-      client.startCall(localVideoRef.current as HTMLVideoElement, isVideo);
+      if (isReceiving) {
+        client.answerCall(localVideoRef.current as HTMLVideoElement, isVideo);
+      } else {
+        client.startCall(localVideoRef.current as HTMLVideoElement, isVideo);
+      }
     }
 
     return () => {
-      soundManager.stopAll(); // Ensure sounds stop on unmount
+      soundManager.stopAll();
       if (timerRef.current) clearInterval(timerRef.current);
-      client.endCall();
+      clientRef.current?.endCall();
     };
-  }, [chatId, isReceiving, isVideo, user]);
+  }, [chatId, isReceiving, isVideo, user, hasAccepted]);
+
+  const handleAccept = () => {
+    soundManager.stopAll();
+    setHasAccepted(true);
+  };
 
   const handleEndCall = () => {
+    soundManager.stopAll();
     if (timerRef.current) clearInterval(timerRef.current);
     clientRef.current?.endCall();
     onEndCall();
@@ -90,21 +100,26 @@ export const CallScreen: React.FC<CallScreenProps> = ({ chatId, isReceiving, isV
           ref={remoteVideoRef} 
           autoPlay 
           playsInline 
-          className={`w-full h-full object-cover transition-opacity ${isVideoOff ? 'opacity-0' : 'opacity-100'}`} 
+          className={`w-full h-full object-cover transition-opacity ${isVideoOff || !hasAccepted ? 'opacity-0' : 'opacity-100'}`} 
         />
         <div className="absolute inset-0 bg-slate-950/40 backdrop-blur-sm" />
       </div>
 
       <div className="z-10 text-center mb-8">
-        <h2 className="text-2xl font-black text-white uppercase tracking-widest text-shadow-sm">Chamada de {isVideoOff ? 'Voz' : 'Vídeo'} {isReceiving ? 'Recebida' : 'em Andamento'}</h2>
-        {callDuration === null ? (
+        <h2 className="text-2xl font-black text-white uppercase tracking-widest text-shadow-sm">
+          {isReceiving && !hasAccepted ? 'Chamada de Vídeo' : `Chamada de ${isVideoOff ? 'Voz' : 'Vídeo'}`} 
+          {isReceiving && !hasAccepted ? ' Recebida' : (isReceiving ? ' em Andamento' : ' Efetuada')}
+        </h2>
+        {!hasAccepted ? (
+          <p className="text-indigo-400 font-bold mt-2 animate-bounce">📱 Tocando...</p>
+        ) : callDuration === null ? (
           <p className="text-indigo-400 font-bold mt-2 animate-pulse">Conectando via Servidores Edge...</p>
         ) : (
           <p className="text-emerald-400 font-bold mt-2 text-xl font-mono">{formatDuration(callDuration)}</p>
         )}
       </div>
 
-      <div className={`relative z-10 w-full max-w-sm aspect-[3/4] bg-slate-900 overflow-hidden rounded-[3rem] shadow-2xl border-4 border-white/10 transition-opacity ${isVideoOff ? 'opacity-0' : 'opacity-100'}`}>
+      <div className={`relative z-10 w-full max-w-sm aspect-[3/4] bg-slate-900 overflow-hidden rounded-[3rem] shadow-2xl border-4 border-white/10 transition-opacity ${isVideoOff || !hasAccepted ? 'opacity-0' : 'opacity-100'}`}>
         {/* Local Video Mini */}
         <video 
           ref={localVideoRef} 
@@ -116,24 +131,43 @@ export const CallScreen: React.FC<CallScreenProps> = ({ chatId, isReceiving, isV
       </div>
 
       <div className="fixed bottom-12 left-0 right-0 z-10 flex items-center justify-center gap-6">
-        <button 
-          onClick={() => setIsMuted(!isMuted)}
-          className={`w-14 h-14 rounded-full flex items-center justify-center backdrop-blur-md border ${isMuted ? 'bg-red-500/20 border-red-500/50 text-red-400' : 'bg-white/10 border-white/20 text-white'}`}
-        >
-          {isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
-        </button>
-        <button 
-          onClick={handleEndCall}
-          className="w-20 h-20 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 transition-colors shadow-lg active:scale-90"
-        >
-          <PhoneOff className="w-8 h-8" />
-        </button>
-        <button 
-          onClick={() => setIsVideoOff(!isVideoOff)}
-          className={`w-14 h-14 rounded-full flex items-center justify-center backdrop-blur-md border ${isVideoOff ? 'bg-red-500/20 border-red-500/50 text-red-400' : 'bg-white/10 border-white/20 text-white'}`}
-        >
-          {isVideoOff ? <VideoOff className="w-6 h-6" /> : <Video className="w-6 h-6" />}
-        </button>
+        {isReceiving && !hasAccepted ? (
+          <>
+            <button 
+              onClick={handleEndCall}
+              className="w-20 h-20 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 transition-colors shadow-lg active:scale-90"
+            >
+              <PhoneOff className="w-8 h-8" />
+            </button>
+            <button 
+              onClick={handleAccept}
+              className="w-24 h-24 bg-emerald-500 text-white rounded-full flex items-center justify-center hover:bg-emerald-600 transition-colors shadow-2xl active:scale-95 animate-pulse"
+            >
+              <Video className="w-10 h-10" />
+            </button>
+          </>
+        ) : (
+          <>
+            <button 
+              onClick={() => setIsMuted(!isMuted)}
+              className={`w-14 h-14 rounded-full flex items-center justify-center backdrop-blur-md border ${isMuted ? 'bg-red-500/20 border-red-500/50 text-red-400' : 'bg-white/10 border-white/20 text-white'}`}
+            >
+              {isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
+            </button>
+            <button 
+              onClick={handleEndCall}
+              className="w-20 h-20 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 transition-colors shadow-lg active:scale-90"
+            >
+              <PhoneOff className="w-8 h-8" />
+            </button>
+            <button 
+              onClick={() => setIsVideoOff(!isVideoOff)}
+              className={`w-14 h-14 rounded-full flex items-center justify-center backdrop-blur-md border ${isVideoOff ? 'bg-red-500/20 border-red-500/50 text-red-400' : 'bg-white/10 border-white/20 text-white'}`}
+            >
+              {isVideoOff ? <VideoOff className="w-6 h-6" /> : <Video className="w-6 h-6" />}
+            </button>
+          </>
+        )}
       </div>
     </motion.div>
   );

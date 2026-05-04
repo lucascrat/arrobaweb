@@ -123,6 +123,8 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const recordingDurationRef = useRef<number>(0);
+  const recordingStartTimeRef = useRef<number>(0);
   const chatInfoRef = useRef<any>(null);
 
   useEffect(() => {
@@ -381,11 +383,14 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
       };
 
       mediaRecorder.onstop = async () => {
-        if (recordingDuration < 1) {
+        const finalDuration = (Date.now() - recordingStartTimeRef.current) / 1000;
+        
+        if (finalDuration < 0.5) {
           // Recording too short, don't send
           stream.getTracks().forEach(track => track.stop());
           clearInterval(recordingTimerRef.current as NodeJS.Timeout);
           setRecordingDuration(0);
+          recordingDurationRef.current = 0;
           setIsRecording(false);
           setErrorMessage("Gravação muito curta.");
           return;
@@ -399,6 +404,7 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
         
         clearInterval(recordingTimerRef.current as NodeJS.Timeout);
         setRecordingDuration(0);
+        recordingDurationRef.current = 0;
         setIsRecording(false);
         setIsUploading(true);
 
@@ -411,7 +417,7 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
             contentType: 'audio',
             fileName: audioFile.name,
             fileSize: audioFile.size,
-            duration: recordingDuration,
+            duration: Math.round(finalDuration),
             createdAt: serverTimestamp(),
             status: 'sent',
             avatar: profile?.photoURL || user.photoURL
@@ -435,11 +441,14 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
 
       mediaRecorder.start();
       setIsRecording(true);
+      recordingStartTimeRef.current = Date.now();
+      recordingDurationRef.current = 0;
       soundManager.playClick();
       
       let seconds = 0;
       recordingTimerRef.current = setInterval(() => {
         seconds++;
+        recordingDurationRef.current = seconds;
         setRecordingDuration(seconds);
       }, 1000);
       
@@ -463,6 +472,7 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
       clearInterval(recordingTimerRef.current as NodeJS.Timeout);
       setIsRecording(false);
       setRecordingDuration(0);
+      recordingDurationRef.current = 0;
     }
   };
 

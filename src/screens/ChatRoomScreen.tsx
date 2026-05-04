@@ -732,8 +732,12 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
                     <video 
                       src={msg.video} 
                       controls 
+                      playsInline
+                      preload="metadata"
                       className="rounded-xl w-full max-h-[400px] bg-black shadow-inner" 
-                    />
+                    >
+                      Seu navegador não suporta vídeos.
+                    </video>
                     {msg.text && <p className="px-3 pb-2 text-sm font-medium leading-relaxed">{msg.text}</p>}
                   </div>
                 )}

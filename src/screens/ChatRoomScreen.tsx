@@ -423,9 +423,9 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
         console.error("Firestore error after file upload:", fsError);
         handleFirestoreError(fsError, OperationType.CREATE, `chats/${chatId}/messages`);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Upload error:", error);
-      setErrorMessage("Falha no upload do arquivo. Verifique sua conexão.");
+      setErrorMessage(error.message || "Falha no upload do arquivo. Verifique sua conexão.");
       soundManager.playAlert();
     } finally {
       setIsUploading(false);

@@ -13,4 +13,6 @@ export type Screen =
   | 'subscription'
   | 'notifications'
   | 'profile'
-  | 'cloudflare-config';
+  | 'cloudflare-config'
+  | 'store-manager'
+  | 'admin-dashboard';

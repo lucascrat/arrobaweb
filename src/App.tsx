@@ -15,6 +15,8 @@ import { NotificationsScreen } from './screens/NotificationsScreen';
 import { ProfileScreen } from './screens/ProfileScreen';
 import { CloudflareConfigScreen } from './screens/CloudflareConfigScreen';
 import { PublicStoreScreen } from './screens/PublicStoreScreen';
+import { StoreManagerScreen } from './screens/StoreManagerScreen';
+import { AdminDashboardScreen } from './screens/AdminDashboardScreen';
 import { Screen } from './types';
 import { AuthProvider, useAuth } from './lib/AuthContext';
 
@@ -96,6 +98,10 @@ function AppContent() {
         return <ProfileScreen setScreen={setScreen} />;
       case 'cloudflare-config':
         return <CloudflareConfigScreen setScreen={setScreen} />;
+      case 'store-manager':
+        return <StoreManagerScreen setScreen={setScreen} />;
+      case 'admin-dashboard':
+        return <AdminDashboardScreen setScreen={setScreen} />;
       default:
         return <OnboardingScreen next={() => setScreen('registration')} />;
     }

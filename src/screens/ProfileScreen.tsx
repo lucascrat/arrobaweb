@@ -14,7 +14,8 @@ import {
   Volume2,
   Bell,
   Camera,
-  Cloud
+  Cloud,
+  Store
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Screen } from '../types';
@@ -43,14 +44,20 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ setScreen }) => {
   const menuItems = [
     { id: 'wallet', label: 'Minha Wallet', icon: Zap, sub: 'Gerenciar ativos e @nomes' },
     { id: 'subscription', label: 'Arroba Plus', icon: Terminal, sub: 'Assinatura ativa até jun/26' },
+    ...(profile?.accountType === 'business' ? [
+      { id: 'store-manager', label: 'Gerenciar Loja', icon: Store, sub: 'Produtos, IA e Agendamentos' }
+    ] : []),
     { id: 'notifications', label: 'Alertas', icon: Volume2, sub: 'Preferências de som e sistema' },
     { id: 'cloudflare-config', label: 'Cloudflare R2', icon: Cloud, sub: 'Configurar armazenamento segredo' },
     { id: 'settings', label: 'Configurações', icon: Settings, sub: 'Privacidade e segurança' },
+    ...(profile?.isAdmin ? [
+      { id: 'admin-dashboard', label: 'Painel Admin', icon: Terminal, sub: 'Gestão da Plataforma Arroba' }
+    ] : []),
   ];
 
   const handleMenuClick = (id: string) => {
     soundManager.playClick();
-    if (id === 'wallet' || id === 'subscription' || id === 'notifications' || id === 'cloudflare-config') {
+    if (['wallet', 'subscription', 'notifications', 'cloudflare-config', 'store-manager', 'admin-dashboard'].includes(id)) {
       setScreen(id as Screen);
     }
   };

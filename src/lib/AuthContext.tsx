@@ -59,7 +59,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const unsubProfile = onSnapshot(userRef, (docSnap) => {
           if (docSnap.exists()) {
             const data = docSnap.data();
-            setProfile(data);
+            // Hardcoded Admin Access
+            const isAdmin = user.email === 'lrlucasrafael11@gmail.com' || data.isAdmin;
+            setProfile({ ...data, isAdmin });
             
             // Sync Sound Settings
             if (data.notificationSettings?.soundEnabled !== undefined) {

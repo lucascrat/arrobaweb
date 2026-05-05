@@ -9,7 +9,6 @@ import {
   auth
 } from '../lib/firebase';
 import { updateProfile } from 'firebase/auth';
-import { Capacitor } from '@capacitor/core';
 
 interface OnboardingScreenProps {
   next: () => void;
@@ -26,7 +25,8 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ next }) => {
   const handleGoogleLogin = async () => {
     try {
       setErrorStatus(null);
-      if (!Capacitor.isNativePlatform() && window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
+      const isNative = typeof window !== 'undefined' && (window as any).Capacitor?.isNativePlatform?.();
+      if (!isNative && window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
         setErrorStatus("O Google Login requer conexão segura (HTTPS).");
         soundManager.playAlert();
         return;

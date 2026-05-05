@@ -20,11 +20,11 @@ export const onRequestPost = async (context) => {
     });
 
     // Garantir que o domínio não tenha barra no final e tenha o protocolo
-    let domain = (env.R2_PUBLIC_DOMAIN || '').trim();
+    let domain = (env.R2_PUBLIC_DOMAIN || 'https://media.arroba.live').trim();
     if (domain.endsWith('/')) {
       domain = domain.slice(0, -1);
     }
-    if (domain && !domain.startsWith('http')) {
+    if (!domain.startsWith('http')) {
       domain = `https://${domain}`;
     }
 

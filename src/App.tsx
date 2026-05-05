@@ -51,7 +51,9 @@ function AppContent() {
   React.useEffect(() => {
     if (!loading) {
       if (user && profile) {
-        if (profile.accountType === 'business' && profile.onboardingCompleted !== true) {
+        // If it's a business account but onboarding isn't done, force setup
+        // UNLESS the user is an admin (who might be testing or managing)
+        if (profile.accountType === 'business' && profile.onboardingCompleted !== true && !profile.isAdmin) {
            setScreen('store-setup');
         } else if (screen === 'onboarding' || screen === 'registration' || screen === 'store-setup') {
           setScreen('chat-list');

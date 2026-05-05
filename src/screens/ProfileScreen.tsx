@@ -57,7 +57,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ setScreen }) => {
 
   const handleMenuClick = (id: string) => {
     soundManager.playClick();
-    if (['wallet', 'subscription', 'notifications', 'cloudflare-config', 'store-manager', 'admin-dashboard'].includes(id)) {
+    if (['wallet', 'subscription', 'notifications', 'cloudflare-config', 'store-manager', 'admin-dashboard', 'business-profile'].includes(id)) {
       setScreen(id as Screen);
     }
   };

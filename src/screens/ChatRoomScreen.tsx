@@ -719,8 +719,18 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
                     <img 
                       src={msg.image} 
                       className="rounded-xl w-full max-h-[400px] object-cover shadow-inner" 
-                      alt="Shared" 
+                      alt="Imagem"
                       loading="lazy"
+                      onError={(e) => {
+                        const parent = e.currentTarget.parentElement;
+                        if (parent && !parent.querySelector('.img-error-msg')) {
+                          const err = document.createElement('p');
+                          err.className = 'img-error-msg px-3 py-2 text-xs text-red-300 break-all';
+                          err.textContent = `❌ Link: ${msg.image}`;
+                          parent.appendChild(err);
+                        }
+                        (e.currentTarget as HTMLImageElement).style.display = 'none';
+                      }}
                     />
                     {msg.caption && <p className="px-3 pb-2 text-sm font-medium leading-relaxed">{msg.caption}</p>}
                     {msg.text && <p className="px-3 pb-2 text-sm font-medium leading-relaxed">{msg.text}</p>}

@@ -52,6 +52,7 @@ interface UserProfile {
   uid: string;
   username: string;
   storeName?: string;
+  professionalSlug?: string;
   accountType: 'personal' | 'business';
   photoURL?: string;
   createdAt?: any;
@@ -350,6 +351,17 @@ export const AdminDashboardScreen: React.FC<AdminDashboardProps> = ({ setScreen 
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
+                        {u.accountType === 'business' && u.professionalSlug && (
+                          <a 
+                            href={`https://${u.professionalSlug}.arroba.live`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-2 bg-white/5 rounded-xl text-fuchsia-400 active:scale-90 transition-transform"
+                            title="Ver Loja Pública"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </a>
+                        )}
                         <button 
                           onClick={() => handleToggleAccountType(u)}
                           className={`px-2 py-1 rounded-lg text-[8px] font-black uppercase transition-all ${

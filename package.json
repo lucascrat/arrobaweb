@@ -7,12 +7,13 @@
     "dev": "tsx server.ts",
     "build": "vite build",
     "start": "node server.js",
-    "preview": "vite preview",
+    "preview": "npm run build && wrangler dev",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "mobile:sync": "npm run build && npx cap sync",
     "mobile:open:android": "npx cap open android",
-    "mobile:open:ios": "npx cap open ios"
+    "mobile:open:ios": "npx cap open ios",
+    "deploy": "npm run build && wrangler deploy"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1042.0",
@@ -42,6 +43,7 @@
   },
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",
+    "@cloudflare/vite-plugin": "^1.36.0",
     "@firebase/eslint-plugin-security-rules": "^0.0.2",
     "@types/express": "^5.0.6",
     "@types/multer": "^2.1.0",
@@ -50,6 +52,7 @@
     "tailwindcss": "^4.2.4",
     "tsx": "^4.21.0",
     "typescript": "~6.0.3",
-    "vite": "^8.0.10"
+    "vite": "^8.0.10",
+    "wrangler": "^4.88.0"
   }
 }

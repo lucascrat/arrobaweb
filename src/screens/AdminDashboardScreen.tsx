@@ -17,7 +17,12 @@ import {
   Edit,
   Save,
   X,
-  Loader
+  Loader,
+  Eye,
+  Sparkles,
+  ShoppingBag,
+  Calendar,
+  MessageCircle
 } from 'lucide-react';
 import { 
   collection, 
@@ -37,6 +42,7 @@ import { db } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
 import { Screen } from '../types';
 import { soundManager } from '../lib/sounds';
+import { seedTemplates } from '../lib/seed';
 
 interface AdminDashboardProps {
   setScreen: (s: Screen) => void;
@@ -133,6 +139,77 @@ export const AdminDashboardScreen: React.FC<AdminDashboardProps> = ({ setScreen 
     }
   };
 
+  const [previewTemplate, setPreviewTemplate] = useState<StoreTemplate | null>(null);
+
+  // Group templates by category
+  const categories = Array.from(new Set(templates.map(t => t.category || 'Geral')));
+
+  const renderStorePreview = (tmpl: StoreTemplate) => {
+    return (
+      <div className="fixed inset-0 bg-slate-950 z-[200] flex flex-col overflow-y-auto pb-10">
+        <header className="h-16 flex items-center justify-between px-6 border-b border-white/5 bg-slate-950/80 backdrop-blur-xl sticky top-0 z-10">
+          <div className="flex items-center gap-3">
+            <button onClick={() => setPreviewTemplate(null)} className="p-2 -ml-2 text-slate-400">
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+            <div>
+              <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest leading-none mb-1">Simulação de Loja</p>
+              <h2 className="text-sm font-black text-white tracking-tight">{tmpl.name}</h2>
+            </div>
+          </div>
+          <button onClick={() => setPreviewTemplate(null)} className="p-2 text-slate-400"><X className="w-5 h-5"/></button>
+        </header>
+
+        <div className="flex-1 max-w-lg mx-auto w-full p-6 py-12 text-center">
+          <div className="mb-8">
+            <div className="w-24 h-24 rounded-3xl bg-white/5 border-4 border-white/10 mx-auto mb-4 flex items-center justify-center">
+              <Store className="w-10 h-10 text-indigo-400" />
+            </div>
+            <h1 className="text-3xl font-black text-white mb-2">Sua Loja Exemplo</h1>
+            <p className="text-slate-400 text-sm">@{tmpl.category.toLowerCase()}_exemplo</p>
+          </div>
+
+          <div className="bg-white/5 border border-white/10 rounded-3xl p-6 mb-8">
+            <p className="text-slate-300 text-sm leading-relaxed">{tmpl.description}</p>
+          </div>
+
+          <div className="space-y-3">
+            {tmpl.config.storeMode === 'scheduling' && (
+              <button className="w-full bg-emerald-500 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-3 shadow-lg">
+                <Calendar className="w-5 h-5" /> Ver Serviços (Exemplo)
+              </button>
+            )}
+            {(tmpl.config.storeMode === 'store' || tmpl.config.storeMode === 'store+ai') && (
+              <button className="w-full bg-indigo-500 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-3 shadow-lg">
+                <ShoppingBag className="w-5 h-5" /> Ver Catálogo (Exemplo)
+              </button>
+            )}
+            {tmpl.config.storeMode === 'store+ai' && (
+              <button className="w-full bg-white/5 border border-white/10 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-3">
+                <MessageCircle className="w-5 h-5 text-indigo-400" /> Atendente IA
+              </button>
+            )}
+          </div>
+
+          <div className="mt-12 pt-8 border-t border-white/5">
+            <h3 className="text-xs font-black uppercase tracking-widest text-slate-500 mb-6">Exemplo de Conteúdo</h3>
+            <div className="grid grid-cols-2 gap-3">
+              {[1, 2, 3, 4].map(i => (
+                <div key={i} className="bg-white/5 border border-white/5 rounded-2xl p-4 text-left">
+                  <div className="w-full aspect-square bg-white/5 rounded-xl mb-3 flex items-center justify-center">
+                    {tmpl.config.storeMode === 'scheduling' ? <Calendar className="w-6 h-6 text-slate-700"/> : <ShoppingBag className="w-6 h-6 text-slate-700"/>}
+                  </div>
+                  <p className="text-white font-bold text-[10px]">Item de Demonstração {i}</p>
+                  <p className="text-indigo-400 font-black text-xs mt-1">R$ 99,90</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   if (profile?.accountType !== 'business' && !profile?.isAdmin && profile?.email !== 'lrlucasrafael11@gmail.com') {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 text-center">
@@ -200,6 +277,7 @@ export const AdminDashboardScreen: React.FC<AdminDashboardProps> = ({ setScreen 
 
         {/* Tab Content */}
         <div className="min-h-[400px]">
+          {previewTemplate && renderStorePreview(previewTemplate)}
           {tab === 'overview' && (
             <div className="space-y-6">
               <div className="bg-gradient-to-br from-indigo-600/20 to-fuchsia-600/20 border border-white/10 rounded-[2.5rem] p-8 text-center">
@@ -245,7 +323,7 @@ export const AdminDashboardScreen: React.FC<AdminDashboardProps> = ({ setScreen 
 
               <div className="space-y-3">
                 {users
-                  .filter(u => u.username.includes(searchTerm) || u.storeName?.toLowerCase().includes(searchTerm.toLowerCase()))
+                  .filter(u => (u.username || '').includes(searchTerm) || u.storeName?.toLowerCase()?.includes(searchTerm.toLowerCase()))
                   .map(u => (
                     <div key={u.uid} className="bg-white/5 border border-white/10 p-4 rounded-2xl flex items-center justify-between">
                       <div className="flex items-center gap-3">
@@ -271,39 +349,83 @@ export const AdminDashboardScreen: React.FC<AdminDashboardProps> = ({ setScreen 
           )}
 
           {tab === 'templates' && (
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <h4 className="text-xs font-black uppercase tracking-widest text-slate-500">Modelos de Negócio</h4>
-                <button 
-                  onClick={() => { setEditingTemplate(null); setShowTemplateForm(true); }}
-                  className="px-4 py-2 bg-indigo-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2"
-                >
-                  <Plus className="w-3.5 h-3.5" /> Novo
-                </button>
-              </div>
+            <div className="space-y-8">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-xs font-black uppercase tracking-widest text-slate-500 mb-1">Modelos de Negócio</h4>
+                    <p className="text-[10px] text-slate-600 font-bold uppercase tracking-wider">Crie e visualize estilos de lojas</p>
+                  </div>
+                  <div className="flex gap-2">
+                    {templates.length === 0 && (
+                      <button 
+                        onClick={async () => {
+                          await seedTemplates();
+                          soundManager.playChime();
+                        }}
+                        className="px-4 py-2 border border-indigo-500/30 text-indigo-400 rounded-xl text-[10px] font-black uppercase tracking-widest active:scale-95"
+                      >
+                        Carregar Padrão
+                      </button>
+                    )}
+                    <button 
+                      onClick={() => { setEditingTemplate(null); setShowTemplateForm(true); }}
+                      className="px-4 py-2 bg-indigo-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-lg active:scale-95"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Novo
+                    </button>
+                  </div>
+                </div>
 
               {templates.length === 0 ? (
-                <div className="text-center py-12 border-2 border-dashed border-white/5 rounded-3xl">
+                <div className="text-center py-20 border-2 border-dashed border-white/5 rounded-[2.5rem]">
                   <Layout className="w-12 h-12 text-slate-800 mx-auto mb-4" />
                   <p className="text-slate-500 font-bold text-sm">Nenhum modelo cadastrado</p>
+                  <button onClick={() => setShowTemplateForm(true)} className="mt-4 text-indigo-400 font-black text-xs uppercase tracking-widest">Clique para criar o primeiro</button>
                 </div>
               ) : (
-                <div className="grid gap-4">
-                  {templates.map(tmpl => (
-                    <div key={tmpl.id} className="bg-white/5 border border-white/10 rounded-3xl overflow-hidden">
-                      <div className="p-5">
-                        <div className="flex justify-between items-start mb-2">
-                          <h5 className="text-white font-black">{tmpl.name}</h5>
-                          <div className="flex gap-2">
-                            <button onClick={() => { setEditingTemplate(tmpl); setShowTemplateForm(true); }} className="p-2 text-slate-500 hover:text-white"><Edit className="w-4 h-4"/></button>
-                            <button onClick={() => handleDeleteTemplate(tmpl.id)} className="p-2 text-slate-500 hover:text-red-400"><Trash2 className="w-4 h-4"/></button>
-                          </div>
-                        </div>
-                        <p className="text-slate-400 text-xs line-clamp-2 mb-4">{tmpl.description}</p>
-                        <div className="flex items-center gap-2">
-                          <span className="px-2 py-1 bg-cyan-500/20 text-cyan-400 rounded-lg text-[9px] font-black uppercase">{tmpl.category}</span>
-                          <span className="px-2 py-1 bg-white/5 text-slate-500 rounded-lg text-[9px] font-black uppercase">{tmpl.config.storeMode}</span>
-                        </div>
+                <div className="space-y-10">
+                  {categories.map(cat => (
+                    <div key={cat} className="space-y-4">
+                      <div className="flex items-center gap-3">
+                        <div className="h-px flex-1 bg-white/5" />
+                        <h5 className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-400/50">{cat}</h5>
+                        <div className="h-px flex-1 bg-white/5" />
+                      </div>
+
+                      <div className="grid gap-4">
+                        {templates.filter(t => (t.category || 'Geral') === cat).map(tmpl => (
+                          <motion.div 
+                            key={tmpl.id} 
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="bg-white/5 border border-white/10 rounded-[2rem] overflow-hidden group"
+                          >
+                            <div className="p-6">
+                              <div className="flex justify-between items-start mb-3">
+                                <div>
+                                  <h5 className="text-white font-black">{tmpl.name}</h5>
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <span className="px-2 py-0.5 bg-white/5 text-slate-500 rounded-md text-[8px] font-black uppercase tracking-widest border border-white/5">
+                                      {tmpl.config.storeMode}
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="flex gap-1">
+                                  <button onClick={() => { setEditingTemplate(tmpl); setShowTemplateForm(true); }} className="p-2.5 bg-white/5 rounded-xl text-slate-500 hover:text-white transition-colors active:scale-90"><Edit className="w-4 h-4"/></button>
+                                  <button onClick={() => handleDeleteTemplate(tmpl.id)} className="p-2.5 bg-white/5 rounded-xl text-slate-500 hover:text-red-400 transition-colors active:scale-90"><Trash2 className="w-4 h-4"/></button>
+                                </div>
+                              </div>
+                              <p className="text-slate-400 text-xs line-clamp-2 mb-6 leading-relaxed">{tmpl.description}</p>
+                              
+                              <button 
+                                onClick={() => setPreviewTemplate(tmpl)}
+                                className="w-full py-4 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 rounded-2xl text-[10px] font-black uppercase tracking-[0.15em] flex items-center justify-center gap-2 hover:bg-indigo-500 hover:text-white transition-all active:scale-95 group-hover:shadow-primary-glow"
+                              >
+                                <Eye className="w-4 h-4" /> Simular Loja
+                              </button>
+                            </div>
+                          </motion.div>
+                        ))}
                       </div>
                     </div>
                   ))}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowLeft, Plus, Trash2, Edit3, Package, DollarSign, Tag, Image, Loader, CheckCircle, X, Store, Eye, Link, Copy, ToggleLeft, ToggleRight } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Edit3, Package, DollarSign, Tag, Image, Loader, CheckCircle, X, Store, Eye, Link, Copy, ToggleLeft, ToggleRight, Calendar, MessageCircle, ShoppingBag } from 'lucide-react';
 import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, query, orderBy, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
@@ -44,6 +44,7 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
   const [accessCode, setAccessCode] = useState(profile?.accessCode || '');
   const [storeMode, setStoreMode] = useState<'store' | 'store+ai' | 'scheduling'>(profile?.storeMode || 'store');
   const [storeDescription, setStoreDescription] = useState(profile?.storeDescription || '');
+  const [professionalSlug, setProfessionalSlug] = useState(profile?.professionalSlug || '');
   const [efiConfig, setEfiConfig] = useState({
     clientId: profile?.efiConfig?.clientId || '',
     clientSecret: profile?.efiConfig?.clientSecret || '',
@@ -288,6 +289,7 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
         storeMode,
         storeDescription,
         efiConfig,
+        professionalSlug: professionalSlug.trim().toLowerCase(),
         updatedAt: serverTimestamp()
       });
       setSuccessMsg('Configurações salvas!');
@@ -300,7 +302,7 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
     }
   };
 
-  const storeLink = `https://${profile?.professionalSlug}.arroba.live`;
+  const storeLink = `https://${profile?.professionalSlug || 'sua-loja'}.arroba.live`;
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col pb-32">
@@ -371,10 +373,10 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <a href={storeLink} target="_blank" rel="noopener noreferrer"
-            className="flex items-center gap-1 px-3 py-1.5 bg-fuchsia-500/20 border border-fuchsia-500/30 rounded-full text-fuchsia-300 text-xs font-bold">
+          <button onClick={() => setScreen('public-store')}
+            className="flex items-center gap-1 px-3 py-1.5 bg-fuchsia-500/20 border border-fuchsia-500/30 rounded-full text-fuchsia-300 text-xs font-bold transition-all hover:bg-fuchsia-500/30">
             <Eye className="w-3.5 h-3.5" /> Ver Loja
-          </a>
+          </button>
         </div>
       </header>
 
@@ -413,7 +415,7 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
             <div className="bg-fuchsia-500/10 border border-fuchsia-500/20 rounded-2xl p-4 flex items-center justify-between">
               <div>
                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Link da sua loja</p>
-                <p className="text-fuchsia-300 font-black text-sm">{profile?.professionalSlug}.arroba.live</p>
+                <p className="text-fuchsia-300 font-black text-sm">{profile?.professionalSlug || 'sua-loja'}.arroba.live</p>
               </div>
               <button
                 onClick={() => { navigator.clipboard.writeText(storeLink); setSuccessMsg('Link copiado!'); setTimeout(() => setSuccessMsg(''), 2000); }}
@@ -669,6 +671,20 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
                 rows={4}
                 className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-white text-sm font-medium focus:outline-none focus:border-fuchsia-500/50 resize-none"
               />
+            </div>
+
+            {/* Custom Link */}
+            <div>
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Link da Loja</label>
+              <div className="flex items-center bg-white/5 border border-white/10 rounded-2xl overflow-hidden focus-within:border-fuchsia-500/50">
+                <input
+                  value={professionalSlug}
+                  onChange={(e) => setProfessionalSlug(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''))}
+                  placeholder="sua-loja"
+                  className="w-full bg-transparent p-4 text-white font-black text-sm focus:outline-none"
+                />
+                <span className="pr-4 text-slate-500 font-bold text-sm">.arroba.live</span>
+              </div>
             </div>
 
             {/* Access Code Toggle */}

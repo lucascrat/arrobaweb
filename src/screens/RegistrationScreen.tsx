@@ -99,8 +99,9 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({ next }) 
           accountType,
           storeName: isBusiness ? (storeName.trim() || 'Minha Loja') : null,
           professionalSlug: isBusiness ? professionalSlug : null,
-          storeMode: isBusiness ? 'store' : null,
+          storeMode: isBusiness ? null : null, // Set to null initially for business
           storeDescription: '',
+          onboardingCompleted: isBusiness ? false : true,
           accessCodeEnabled: false,
           email: currentUser.email || '',
           displayName: currentUser.displayName || cleanUsername,

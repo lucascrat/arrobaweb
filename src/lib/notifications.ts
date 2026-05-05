@@ -2,7 +2,7 @@ import { PushNotifications } from '@capacitor/push-notifications';
 import { Capacitor } from '@capacitor/core';
 import { getToken, onMessage } from 'firebase/messaging';
 import { getMessagingSafe } from './firebase';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, getDoc } from 'firebase/firestore';
 import { db } from './firebase';
 
 export const setupPushNotifications = async (userId: string) => {

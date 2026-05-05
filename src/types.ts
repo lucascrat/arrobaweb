@@ -15,4 +15,6 @@ export type Screen =
   | 'profile'
   | 'cloudflare-config'
   | 'store-manager'
-  | 'admin-dashboard';
+  | 'admin-dashboard'
+  | 'store-setup'
+  | 'public-store';

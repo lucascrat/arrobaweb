@@ -9,7 +9,6 @@ import {
   auth
 } from '../lib/firebase';
 import { updateProfile } from 'firebase/auth';
-import { Capacitor } from '@capacitor/core';
 
 interface OnboardingScreenProps {
   next: () => void;
@@ -26,7 +25,8 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ next }) => {
   const handleGoogleLogin = async () => {
     try {
       setErrorStatus(null);
-      if (!Capacitor.isNativePlatform() && window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
+      const isNative = typeof window !== 'undefined' && (window as any).Capacitor?.isNativePlatform?.();
+      if (!isNative && window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
         setErrorStatus("O Google Login requer conexão segura (HTTPS).");
         soundManager.playAlert();
         return;
@@ -132,12 +132,12 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ next }) => {
             className="mb-6 bg-red-500/10 border border-red-500/20 px-4 py-3 rounded-2xl text-xs font-bold text-red-400 uppercase tracking-wider text-center"
           >
             {errorStatus}
-            {errorStatus.includes("Domínio") && (
+            {errorStatus?.includes("Domínio") && (
               <p className="mt-2 text-slate-400 font-bold lowercase normal-case tracking-normal">
                 Dica: Vá no Console do Firebase &gt; Auth &gt; Settings &gt; Authorized Domains e adicione "{window.location.hostname}".
               </p>
             )}
-            {errorStatus.includes("Sign-in method") && (
+            {errorStatus?.includes("Sign-in method") && (
               <p className="mt-2 text-slate-400 font-bold lowercase normal-case tracking-normal">
                 Dica: Ative o método 'E-mail/Senha' ou 'Google' no Console do Firebase.
               </p>

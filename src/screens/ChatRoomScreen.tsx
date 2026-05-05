@@ -7,7 +7,7 @@ import { useAuth } from '../lib/AuthContext';
 import { db } from '../lib/firebase';
 import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, getDoc, updateDoc, deleteField } from 'firebase/firestore';
 import { uploadToR2 } from '../lib/r2';
-import { handleFirestoreError, OperationType } from '../lib/firestoreErrorHandler';
+import { handleFirestoreError, OperationType } from '../lib/errorHandlers';
 import { AlertCircle, X } from 'lucide-react';
 import { CallScreen } from './CallScreen';
 
@@ -350,20 +350,6 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
         lastMessageAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
-
-      // Trigger Push Notification for the recipient
-      if (chatInfo && !chatInfo.isGroup) {
-        const otherId = chatInfo.participants?.find((id: string) => id !== user.uid);
-        if (otherId) {
-          const { sendPushNotification } = await import('../lib/notifications');
-          sendPushNotification(
-            otherId, 
-            profile?.username || 'Nova Mensagem', 
-            text,
-            { chatId }
-          );
-        }
-      }
     } catch (error) {
       console.error("Error sending message:", error);
       setErrorMessage("Erro ao enviar mensagem. Tente novamente.");
@@ -404,28 +390,14 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
           updatedAt: serverTimestamp()
         });
 
-        // Trigger Push Notification
-        if (chatInfo && !chatInfo.isGroup) {
-          const otherId = chatInfo.participants?.find((id: string) => id !== user.uid);
-          if (otherId) {
-            const { sendPushNotification } = await import('../lib/notifications');
-            sendPushNotification(
-              otherId, 
-              profile?.username || 'Nova Mensagem', 
-              `Enviou um(a) ${contentType}`,
-              { chatId }
-            );
-          }
-        }
-
         soundManager.playSent();
       } catch (fsError) {
         console.error("Firestore error after file upload:", fsError);
         handleFirestoreError(fsError, OperationType.CREATE, `chats/${chatId}/messages`);
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error("Upload error:", error);
-      setErrorMessage(error.message || "Falha no upload do arquivo. Verifique sua conexão.");
+      setErrorMessage("Falha no upload do arquivo. Verifique sua conexão.");
       soundManager.playAlert();
     } finally {
       setIsUploading(false);
@@ -468,8 +440,11 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
           return;
         }
 
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        const audioFile = new File([audioBlob], `audio-${Date.now()}.webm`, { type: 'audio/webm' });
+        const audioFormat = MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/webm') ? 'webm' : 'mp4';
+        const audioType = audioFormat === 'webm' ? 'audio/webm' : 'audio/mp4';
+        
+        let audioBlob = new Blob(audioChunksRef.current, { type: audioType });
+        const fileName = `audio-${Date.now()}.${audioFormat}`;
         
         // Ensure stream is stopped
         stream.getTracks().forEach(track => track.stop());
@@ -481,15 +456,15 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
         setIsUploading(true);
 
         try {
-          const publicUrl = await uploadToR2(audioFile);
+          const publicUrl = await uploadToR2(audioBlob, fileName);
           
           try {
             await addDoc(collection(db, 'chats', chatId!, 'messages'), {
               senderId: user.uid,
               audio: publicUrl,
               contentType: 'audio',
-              fileName: audioFile.name,
-              fileSize: audioFile.size,
+              fileName: fileName,
+              fileSize: audioBlob.size,
               duration: Math.max(1, Math.round(finalDuration)),
               createdAt: serverTimestamp(),
               status: 'sent',
@@ -501,20 +476,6 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
               lastMessageAt: serverTimestamp(),
               updatedAt: serverTimestamp()
             });
-
-            // Trigger Push Notification
-            if (chatInfo && !chatInfo.isGroup) {
-              const otherId = chatInfo.participants?.find((id: string) => id !== user.uid);
-              if (otherId) {
-                const { sendPushNotification } = await import('../lib/notifications');
-                sendPushNotification(
-                  otherId, 
-                  profile?.username || 'Nova Mensagem', 
-                  `🎤 Mensagem de áudio`,
-                  { chatId }
-                );
-              }
-            }
 
             soundManager.playSent();
           } catch (fsError) {
@@ -710,60 +671,31 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
               <div 
                 onClick={() => setActiveReactionMessageId(activeReactionMessageId === msg.id ? null : msg.id)}
                 className={`
-                rounded-2xl overflow-hidden backdrop-blur-md border border-white/10 shadow-lg cursor-pointer transition-all active:scale-[0.98]
-                ${msg.type === 'sent' ? 'bg-indigo-500/80 text-white' : 'bg-white/5 text-slate-100'}
-                ${msg.image || msg.video ? 'p-1' : 'p-4'}
+                p-4 rounded-3xl space-y-2 backdrop-blur-md border border-white/10 shadow-lg cursor-pointer transition-all active:scale-[0.98]
+                ${msg.type === 'sent' ? 'bg-indigo-500/80 text-white rounded-tr-none' : 'bg-white/5 text-slate-100 rounded-tl-none' }
               `}>
+                {msg.text && <p className="text-sm font-medium leading-relaxed">{msg.text}</p>}
                 {msg.image && (
-                  <div className="flex flex-col gap-2">
-                    <img 
-                      src={msg.image} 
-                      className="rounded-xl w-full max-h-[400px] object-cover shadow-inner" 
-                      alt="Imagem"
-                      loading="lazy"
-                      onError={(e) => {
-                        const parent = e.currentTarget.parentElement;
-                        if (parent && !parent.querySelector('.img-error-msg')) {
-                          const err = document.createElement('p');
-                          err.className = 'img-error-msg px-3 py-2 text-xs text-red-300 break-all';
-                          err.textContent = `❌ Link: ${msg.image}`;
-                          parent.appendChild(err);
-                        }
-                        (e.currentTarget as HTMLImageElement).style.display = 'none';
-                      }}
-                    />
-                    {msg.caption && <p className="px-3 pb-2 text-sm font-medium leading-relaxed">{msg.caption}</p>}
-                    {msg.text && <p className="px-3 pb-2 text-sm font-medium leading-relaxed">{msg.text}</p>}
+                  <div className="space-y-2">
+                    <img src={msg.image} className="rounded-2xl w-full object-cover border border-white/10" alt="Shared" />
+                    {msg.caption && <p className="text-xs font-bold leading-relaxed text-slate-300">{msg.caption}</p>}
                   </div>
                 )}
-
                 {msg.video && (
-                  <div className="flex flex-col gap-2">
+                  <div className="space-y-2">
                     <video 
                       src={msg.video} 
                       controls 
-                      playsInline
-                      preload="metadata"
-                      className="rounded-xl w-full max-h-[400px] bg-black shadow-inner" 
-                    >
-                      Seu navegador não suporta vídeos.
-                    </video>
-                    {msg.text && <p className="px-3 pb-2 text-sm font-medium leading-relaxed">{msg.text}</p>}
+                      className="rounded-2xl w-full max-h-64 bg-black border border-white/10" 
+                    />
+                    {msg.fileName && <p className="text-[10px] font-bold text-slate-400 truncate">{msg.fileName}</p>}
                   </div>
                 )}
-
                 {msg.audio && (
-                  <div className="p-3">
-                    <VoiceMessage src={msg.audio} duration={msg.duration} />
-                  </div>
+                  <VoiceMessage src={msg.audio} duration={msg.duration} />
                 )}
-
-                {msg.text && !msg.image && !msg.video && !msg.audio && (
-                  <p className="text-sm font-medium leading-relaxed">{msg.text}</p>
-                )}
-
                 {msg.file && (
-                  <div className="flex items-center gap-3 p-2 bg-white/10 rounded-xl border border-white/5 mx-2 my-2">
+                  <div className="flex items-center gap-3 p-2 bg-white/10 rounded-2xl border border-white/5">
                     <div className="w-10 h-10 rounded-xl bg-indigo-500/20 flex items-center justify-center text-indigo-400">
                       <Paperclip className="w-5 h-5" />
                     </div>

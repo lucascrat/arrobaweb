@@ -139,6 +139,22 @@ export const AdminDashboardScreen: React.FC<AdminDashboardProps> = ({ setScreen 
     }
   };
 
+  const handleToggleAccountType = async (user: UserProfile) => {
+    try {
+      const newType = user.accountType === 'personal' ? 'business' : 'personal';
+      await updateDoc(doc(db, 'users', user.uid), {
+        accountType: newType,
+        // If becoming business and doesn't have a store name, set a default
+        ...(newType === 'business' && !user.storeName ? { storeName: `Loja de ${user.username}` } : {}),
+        updatedAt: serverTimestamp()
+      });
+      soundManager.playChime();
+    } catch (err) {
+      soundManager.playAlert();
+      alert('Erro ao alterar tipo de conta.');
+    }
+  };
+
   const [previewTemplate, setPreviewTemplate] = useState<StoreTemplate | null>(null);
 
   // Group templates by category
@@ -334,9 +350,16 @@ export const AdminDashboardScreen: React.FC<AdminDashboardProps> = ({ setScreen 
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        {u.accountType === 'business' && (
-                          <div className="px-2 py-1 bg-fuchsia-500/20 rounded-lg text-[8px] font-black text-fuchsia-400 uppercase">PRO</div>
-                        )}
+                        <button 
+                          onClick={() => handleToggleAccountType(u)}
+                          className={`px-2 py-1 rounded-lg text-[8px] font-black uppercase transition-all ${
+                            u.accountType === 'business' 
+                              ? 'bg-fuchsia-500 text-white' 
+                              : 'bg-white/10 text-slate-500'
+                          }`}
+                        >
+                          {u.accountType === 'business' ? 'PRO' : 'FREE'}
+                        </button>
                         <button className="p-2 bg-white/5 rounded-xl text-slate-400">
                           <Edit className="w-4 h-4" />
                         </button>

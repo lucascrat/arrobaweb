@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { collection, query, where, getDocs, limit, doc, getDoc, onSnapshot, orderBy, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { Store, MessageCircle, ShoppingBag, Calendar, AtSign, Lock, ArrowRight, Loader, Package, X, CheckCircle, Send, User } from 'lucide-react';
+import { Store, MessageCircle, ShoppingBag, Calendar, AtSign, Lock, ArrowRight, Loader, Package, X, CheckCircle, Send, User, QrCode, Copy, Check } from 'lucide-react';
 
 interface PublicStoreScreenProps {
   slug: string;
@@ -43,6 +43,9 @@ export const PublicStoreScreen: React.FC<PublicStoreScreenProps> = ({ slug }) =>
   ]);
   const [aiInput, setAiInput] = useState('');
   const [isAiTyping, setIsAiTyping] = useState(false);
+  const [showCheckout, setShowCheckout] = useState(false);
+  const [pixData, setPixData] = useState<any | null>(null);
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
 
   useEffect(() => {
     const fetchStore = async () => {
@@ -126,6 +129,10 @@ export const PublicStoreScreen: React.FC<PublicStoreScreenProps> = ({ slug }) =>
         createdAt: serverTimestamp()
       });
       setSchedulingStatus('success');
+      // If payment is enabled, offer to pay now
+      if (storeData.efiConfig?.active) {
+        handleStartCheckout(selectedService);
+      }
       setTimeout(() => {
         setShowSchedulingQuiz(false);
         setSchedulingStatus('idle');
@@ -163,6 +170,23 @@ export const PublicStoreScreen: React.FC<PublicStoreScreenProps> = ({ slug }) =>
       setAiMessages(prev => [...prev, { id: Date.now().toString(), role: 'ai', text: 'Desculpe, tive um problema ao processar sua mensagem. Pode repetir?' }]);
     } finally {
       setIsAiTyping(false);
+    }
+  };
+
+  const handleStartCheckout = async (item: any) => {
+    if (!storeData) return;
+    setCheckoutLoading(true);
+    setShowCheckout(true);
+
+    try {
+      const { createPixPayment } = await import('../lib/payments');
+      const data = await createPixPayment(item.price, storeData.uid, `Pedido: ${item.name}`);
+      setPixData(data);
+    } catch (err) {
+      alert('Erro ao gerar pagamento. Tente novamente.');
+      setShowCheckout(false);
+    } finally {
+      setCheckoutLoading(false);
     }
   };
 
@@ -449,8 +473,10 @@ export const PublicStoreScreen: React.FC<PublicStoreScreenProps> = ({ slug }) =>
                   </p>
                 </div>
 
-                <button className="w-full bg-indigo-500 text-white font-black py-5 rounded-[1.5rem] flex items-center justify-center gap-3 shadow-primary-glow active:scale-95 transition-all">
-                  <ShoppingBag className="w-5 h-5" /> Tenho Interesse
+                <button 
+                  onClick={() => handleStartCheckout(selectedProduct)}
+                  className="w-full bg-indigo-500 text-white font-black py-5 rounded-[1.5rem] flex items-center justify-center gap-3 shadow-primary-glow active:scale-95 transition-all">
+                  <ShoppingBag className="w-5 h-5" /> Comprar Agora
                 </button>
               </div>
             </motion.div>
@@ -608,6 +634,65 @@ export const PublicStoreScreen: React.FC<PublicStoreScreenProps> = ({ slug }) =>
                   </button>
                 </div>
               </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Checkout / Pix Modal */}
+      <AnimatePresence>
+        {showCheckout && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/90 backdrop-blur-md z-[150] flex items-end sm:items-center justify-center p-0 sm:p-6"
+          >
+            <motion.div
+              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+              className="w-full max-w-sm bg-slate-900 rounded-t-[2.5rem] sm:rounded-[2.5rem] overflow-hidden flex flex-col p-8"
+            >
+              <div className="flex justify-between items-center mb-8">
+                <h3 className="text-xl font-black text-white">Pagamento Pix</h3>
+                <button onClick={() => { setShowCheckout(false); setPixData(null); }} className="p-2 text-slate-400">
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+
+              {checkoutLoading ? (
+                <div className="py-12 flex flex-col items-center gap-4">
+                  <Loader className="w-10 h-10 text-indigo-500 animate-spin" />
+                  <p className="text-slate-500 font-bold text-sm">Gerando seu Pix...</p>
+                </div>
+              ) : pixData ? (
+                <div className="space-y-6 text-center">
+                  <div className="bg-white p-4 rounded-3xl inline-block mx-auto">
+                    <img src={pixData.qrCode} className="w-48 h-48" alt="Pix QR Code" />
+                  </div>
+                  
+                  <div>
+                    <p className="text-slate-500 font-black text-[10px] uppercase tracking-widest mb-1">Valor a Pagar</p>
+                    <p className="text-3xl font-black text-white">R$ {pixData.amount?.toFixed(2).replace('.', ',')}</p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <button 
+                      onClick={() => {
+                        navigator.clipboard.writeText(pixData.pixCode);
+                        soundManager.playChime();
+                      }}
+                      className="w-full bg-white/5 border border-white/10 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-3 active:scale-95 transition-all text-sm"
+                    >
+                      <Copy className="w-4 h-4 text-indigo-400" /> Copiar Código Pix
+                    </button>
+                    <p className="text-[10px] text-slate-500 font-medium">
+                      O pagamento é processado instantaneamente. Após pagar, você receberá a confirmação aqui.
+                    </p>
+                  </div>
+
+                  <div className="pt-4 flex items-center justify-center gap-2 text-emerald-400 font-bold text-xs">
+                    <Check className="w-4 h-4" /> Aguardando pagamento...
+                  </div>
+                </div>
+              ) : null}
             </motion.div>
           </motion.div>
         )}

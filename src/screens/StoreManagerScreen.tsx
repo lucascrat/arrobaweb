@@ -39,12 +39,20 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
   const [saving, setSaving] = useState(false);
   const [uploadingImg, setUploadingImg] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
-  const [tab, setTab] = useState<'products' | 'services' | 'appointments' | 'settings'>('products');
+  const [tab, setTab] = useState<'products' | 'services' | 'appointments' | 'payments' | 'settings'>('products');
   const [accessCodeEnabled, setAccessCodeEnabled] = useState(profile?.accessCodeEnabled || false);
   const [accessCode, setAccessCode] = useState(profile?.accessCode || '');
   const [storeMode, setStoreMode] = useState<'store' | 'store+ai' | 'scheduling'>(profile?.storeMode || 'store');
   const [storeDescription, setStoreDescription] = useState(profile?.storeDescription || '');
+  const [efiConfig, setEfiConfig] = useState({
+    clientId: profile?.efiConfig?.clientId || '',
+    clientSecret: profile?.efiConfig?.clientSecret || '',
+    key: profile?.efiConfig?.key || '',
+    active: profile?.efiConfig?.active || false
+  });
   const [savingSettings, setSavingSettings] = useState(false);
+  const [showWizard, setShowWizard] = useState(false);
+  const [availableTemplates, setAvailableTemplates] = useState<any[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Form state
@@ -84,8 +92,67 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
       setLoading(false);
     });
 
-    return () => { unsub(); sunsub(); aunsub(); };
+    // 4. Fetch Templates
+    const tq = query(collection(db, 'storeTemplates'), orderBy('name', 'asc'));
+    const tunsub = onSnapshot(tq, snap => {
+      setAvailableTemplates(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+
+    return () => { unsub(); sunsub(); aunsub(); tunsub(); };
   }, [user]);
+
+  useEffect(() => {
+    if (!loading && products.length === 0 && services.length === 0) {
+      setShowWizard(true);
+    }
+  }, [loading, products.length, services.length]);
+
+  const handleApplyTemplate = async (template: any) => {
+    if (!user) return;
+    setSaving(true);
+    try {
+      // 1. Update Profile Settings
+      await updateDoc(doc(db, 'users', user.uid), {
+        storeMode: template.config.storeMode,
+        storeDescription: template.description,
+        'config.welcomeMessage': template.config.welcomeMessage,
+        'config.aiPrompt': template.config.aiPrompt,
+        updatedAt: serverTimestamp()
+      });
+      setStoreMode(template.config.storeMode);
+      setStoreDescription(template.description);
+      
+      // 2. Add a sample product or service based on template
+      if (template.config.storeMode === 'scheduling') {
+        await addDoc(collection(db, 'stores', user.uid, 'services'), {
+          name: 'Serviço Demonstrativo',
+          price: 50,
+          duration: '30',
+          description: 'Este é um serviço exemplo do seu novo modelo.',
+          active: true,
+          createdAt: serverTimestamp()
+        });
+      } else {
+        await addDoc(collection(db, 'stores', user.uid, 'products'), {
+          name: 'Produto Exemplo',
+          price: 99.90,
+          description: 'Este é um produto exemplo do seu novo modelo.',
+          image: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=500',
+          category: 'Geral',
+          active: true,
+          createdAt: serverTimestamp()
+        });
+      }
+
+      setShowWizard(false);
+      soundManager.playChime();
+      setSuccessMsg('Modelo aplicado com sucesso!');
+    } catch (err) {
+      soundManager.playAlert();
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -220,6 +287,7 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
         accessCode: accessCode.trim().toUpperCase(),
         storeMode,
         storeDescription,
+        efiConfig,
         updatedAt: serverTimestamp()
       });
       setSuccessMsg('Configurações salvas!');
@@ -235,7 +303,47 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
   const storeLink = `https://${profile?.professionalSlug}.arroba.live`;
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col">
+    <div className="min-h-screen bg-slate-950 flex flex-col pb-32">
+      {/* Wizard Overlay */}
+      <AnimatePresence>
+        {showWizard && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-slate-950 z-[100] flex flex-col p-6 overflow-y-auto">
+            <div className="pt-12 text-center space-y-4 mb-12">
+              <div className="w-20 h-20 bg-indigo-500/20 rounded-[2.5rem] flex items-center justify-center mx-auto text-indigo-400 border border-indigo-500/30">
+                <Store className="w-10 h-10" />
+              </div>
+              <h2 className="text-3xl font-black text-white tracking-tight">Bem-vindo, Soberano!</h2>
+              <p className="text-slate-400 text-sm">Escolha um modelo para configurar sua loja em segundos.</p>
+            </div>
+
+            <div className="grid gap-4">
+              {availableTemplates.map((tmpl) => (
+                <button
+                  key={tmpl.id}
+                  onClick={() => handleApplyTemplate(tmpl)}
+                  className="bg-white/5 border border-white/10 p-6 rounded-[2rem] text-left hover:border-indigo-500/50 transition-all group"
+                >
+                  <div className="flex justify-between items-start mb-4">
+                    <div className="p-3 bg-white/5 rounded-2xl group-hover:bg-indigo-500 transition-all">
+                      <Layout className="w-5 h-5 text-indigo-400 group-hover:text-white" />
+                    </div>
+                    <span className="text-[10px] font-black uppercase px-2 py-1 bg-white/5 text-slate-500 rounded-lg">{tmpl.category}</span>
+                  </div>
+                  <h4 className="text-white font-black text-lg mb-1">{tmpl.name}</h4>
+                  <p className="text-slate-500 text-xs line-clamp-2">{tmpl.description}</p>
+                </button>
+              ))}
+              
+              <button 
+                onClick={() => setShowWizard(false)}
+                className="mt-4 text-slate-500 font-bold text-sm underline py-4"
+              >
+                Configurar manualmente
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
 
       {/* Success Toast */}
@@ -285,6 +393,10 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
             <button onClick={() => setTab('appointments')}
               className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest transition-all ${tab === 'appointments' ? 'text-cyan-400 border-b-2 border-cyan-500' : 'text-slate-500'}`}>
               📅 Agenda
+            </button>
+            <button onClick={() => setTab('payments')}
+              className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest transition-all ${tab === 'payments' ? 'text-emerald-400 border-b-2 border-emerald-500' : 'text-slate-500'}`}>
+              💰 Pagamentos
             </button>
           </>
         )}
@@ -449,6 +561,73 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {tab === 'payments' && (
+          <div className="space-y-6">
+            <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-3xl p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-emerald-500 rounded-xl">
+                  <DollarSign className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-white font-black text-sm">Efi Bank (Gerencianet)</h3>
+                  <p className="text-[10px] text-emerald-400 font-bold uppercase">Integração Pix</p>
+                </div>
+              </div>
+              <p className="text-slate-400 text-xs leading-relaxed mb-6">
+                Conecte sua conta Efi para receber pagamentos via Pix automaticamente.
+              </p>
+
+              <div className="space-y-4">
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center justify-between">
+                  <p className="text-white font-bold text-sm">Ativar Pagamentos</p>
+                  <button onClick={() => setEfiConfig({ ...efiConfig, active: !efiConfig.active })}>
+                    {efiConfig.active ? <ToggleRight className="w-8 h-8 text-emerald-400" /> : <ToggleLeft className="w-8 h-8 text-slate-600" />}
+                  </button>
+                </div>
+
+                <AnimatePresence>
+                  {efiConfig.active && (
+                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="space-y-4 overflow-hidden">
+                      <div>
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Client ID</label>
+                        <input
+                          type="password" value={efiConfig.clientId} onChange={e => setEfiConfig({ ...efiConfig, clientId: e.target.value })}
+                          placeholder="Client_Id_..."
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white text-xs font-medium focus:border-emerald-500/50 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Client Secret</label>
+                        <input
+                          type="password" value={efiConfig.clientSecret} onChange={e => setEfiConfig({ ...efiConfig, clientSecret: e.target.value })}
+                          placeholder="Client_Secret_..."
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white text-xs font-medium focus:border-emerald-500/50 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Chave Pix</label>
+                        <input
+                          value={efiConfig.key} onChange={e => setEfiConfig({ ...efiConfig, key: e.target.value })}
+                          placeholder="Sua chave Pix cadastrada na Efi"
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white text-xs font-medium focus:border-emerald-500/50 outline-none"
+                        />
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </div>
+            
+            <button
+              onClick={handleSaveSettings}
+              disabled={savingSettings}
+              className="w-full bg-indigo-500 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50 shadow-primary-glow"
+            >
+              {savingSettings ? <Loader className="w-5 h-5 animate-spin" /> : 'Salvar Configurações'}
+            </button>
           </div>
         )}
 

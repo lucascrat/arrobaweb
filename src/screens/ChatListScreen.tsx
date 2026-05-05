@@ -100,8 +100,8 @@ export const ChatListScreen: React.FC<ChatListScreenProps> = ({ setScreen, setSe
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
     return (
-      chat.name?.toLowerCase().includes(query) || 
-      chat.username?.toLowerCase().includes(query)
+      chat.name?.toLowerCase()?.includes(query) || 
+      chat.username?.toLowerCase()?.includes(query)
     );
   });
 

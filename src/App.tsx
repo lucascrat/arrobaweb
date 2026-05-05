@@ -17,6 +17,7 @@ import { CloudflareConfigScreen } from './screens/CloudflareConfigScreen';
 import { PublicStoreScreen } from './screens/PublicStoreScreen';
 import { StoreManagerScreen } from './screens/StoreManagerScreen';
 import { AdminDashboardScreen } from './screens/AdminDashboardScreen';
+import { StoreSetupScreen } from './screens/StoreSetupScreen';
 import { Screen } from './types';
 import { AuthProvider, useAuth } from './lib/AuthContext';
 
@@ -50,7 +51,9 @@ function AppContent() {
   React.useEffect(() => {
     if (!loading) {
       if (user && profile) {
-        if (screen === 'onboarding' || screen === 'registration') {
+        if (profile.accountType === 'business' && profile.onboardingCompleted !== true) {
+           setScreen('store-setup');
+        } else if (screen === 'onboarding' || screen === 'registration' || screen === 'store-setup') {
           setScreen('chat-list');
         }
       } else if (user && !profile) {
@@ -102,6 +105,10 @@ function AppContent() {
         return <StoreManagerScreen setScreen={setScreen} />;
       case 'admin-dashboard':
         return <AdminDashboardScreen setScreen={setScreen} />;
+      case 'store-setup':
+        return <StoreSetupScreen setScreen={setScreen} />;
+      case 'public-store':
+        return <PublicStoreScreen slug={profile?.professionalSlug || ''} onClose={() => setScreen('store-manager')} />;
       default:
         return <OnboardingScreen next={() => setScreen('registration')} />;
     }

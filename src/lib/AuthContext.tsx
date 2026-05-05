@@ -42,7 +42,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               });
             }
           } catch (err) {
-            console.warn("Could not set online status (might be new user):", err);
+            console.warn("Could not set online status:", err);
+            // Optionally handle this error too if we want to debug permissions here
+            // handleFirestoreError(err, OperationType.GET, `users/${user.uid}`);
           }
         };
 
@@ -59,8 +61,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const unsubProfile = onSnapshot(userRef, (docSnap) => {
           if (docSnap.exists()) {
             const data = docSnap.data();
-            // Hardcoded Admin Access
-            const isAdmin = user.email === 'lrlucasrafael11@gmail.com' || data.isAdmin;
+            // Admin Logic
+            const isAdmin = 
+              user.email === 'lrlucasrafael11@gmail.com' || 
+              data.isAdmin === true || 
+              data.role === 'admin';
+            
             setProfile({ ...data, isAdmin });
             
             // Sync Sound Settings
@@ -72,7 +78,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
           setLoading(false);
         }, (error) => {
-          console.error("Profile listen error:", error);
+          handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
           setLoading(false);
         });
 

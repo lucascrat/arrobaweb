@@ -15,26 +15,45 @@ export async function getR2PresignedUrl(fileName: string, fileType: string): Pro
   return response.json();
 }
 
-export async function uploadToR2(file: File): Promise<string> {
+export async function uploadToR2(file: File | Blob, fileName?: string): Promise<string> {
   const formData = new FormData();
-  // Safari can throw "The string did not match the expected pattern" on formData.append with custom filename
-  // Let's use a safe File instance instead
-  const safeName = file.name ? file.name.replace(/[^\x00-\x7F]/g, '_') : 'upload';
-  const safeFile = new File([file], safeName || 'file', { type: file.type || 'application/octet-stream' });
-  formData.append('file', safeFile);
+  
+  // Use provided fileName, or file.name if it's a File, or fallback to 'upload'
+  const name = fileName || (file instanceof File ? file.name : 'upload');
+  
+  // Clean up filename to ASCII to avoid Safari InvalidCharacterError
+  const safeName = name.replace(/[^\x00-\x7F]/g, '_') || 'file';
+
+  // Some browsers fail if we construct a new File, so just append the Blob
+  formData.append('file', file, safeName);
 
   const response = await fetch('/api/media/store', {
     method: 'POST',
     body: formData,
   });
 
+  const contentType = response.headers.get('content-type');
+  const isJson = contentType && contentType.includes('application/json');
+
   if (!response.ok) {
-    const errorText = await response.text().catch(() => 'Erro totalmente desconhecido');
-    console.error('R2 Upload Failure Raw:', errorText);
-    throw new Error(errorText || `Erro ${response.status}: Falha no servidor Cloudflare.`);
+    let errorMessage = `Upload failed (${response.status})`;
+    if (isJson) {
+      const errorData = await response.json();
+      errorMessage = errorData.error || errorMessage;
+    } else {
+      const text = await response.text();
+      console.error('Upload failed with non-JSON response:', text.substring(0, 200));
+      errorMessage = `Upload failed (${response.status}): ${response.statusText}`;
+    }
+    throw new Error(errorMessage);
   }
 
-  const data = await response.json();
-  console.log('R2 Upload Success:', data);
-  return data.publicUrl;
+  if (isJson) {
+    const data = await response.json();
+    return data.publicUrl;
+  } else {
+    const text = await response.text();
+    console.error('Upload succeeded but returned non-JSON:', text.substring(0, 200));
+    throw new Error('Server returned invalid response format.');
+  }
 }

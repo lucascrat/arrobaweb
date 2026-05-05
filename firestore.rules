@@ -1,77 +1,86 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // 0. Default Deny
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
     // Global Helpers
     function isSignedIn() { return request.auth != null; }
-    function isVerified() { return isSignedIn() && request.auth.token.email_verified == true; }
+    function isAdmin() { 
+      let email = request.auth.token.get('email', '');
+      return isSignedIn() && (email == "lrlucasrafael11@gmail.com" || email == "lucasrafaellrl11@gmail.com"); 
+    }
+    function isVerified() { return isSignedIn() && request.auth.token.get('email_verified', false) == true; }
     function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
     function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
     function incoming() { return request.resource.data; }
     function existing() { return resource.data; }
     
     function isParticipant(chatId) {
-      return isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+      let chat = get(/databases/$(database)/documents/chats/$(chatId));
+      return isSignedIn() && chat != null && request.auth.uid in chat.data.participants;
+    }
+
+    // Default Deny
+    match /{document=**} {
+      allow read, write: if isAdmin();
     }
 
     // User Rules
     match /users/{userId} {
-      function isValidUser(data) {
-        return data.keys().hasAll(['uid', 'username', 'accountType', 'createdAt', 'updatedAt']) &&
-               data.keys().size() >= 5 &&
-               data.uid == request.auth.uid &&
-               data.username is string && data.username.size() >= 3 && data.username.size() <= 30 &&
-               data.accountType in ['personal', 'business'] &&
-               data.createdAt == request.time &&
-               data.updatedAt == request.time;
-      }
-
       allow get: if isSignedIn();
       allow list: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(userId) && userId == request.auth.uid && isValidUser(incoming());
-      allow update: if isSignedIn() && isOwner(userId) && (
-        incoming().diff(existing()).affectedKeys().hasOnly(['photoURL', 'displayName', 'storeName', 'updatedAt', 'fcmToken', 'online', 'lastSeen', 'notificationSettings']) &&
-        (!incoming().diff(existing()).affectedKeys().hasAny(['updatedAt']) || incoming().updatedAt == request.time) &&
-        (!incoming().diff(existing()).affectedKeys().hasAny(['lastSeen']) || incoming().lastSeen == request.time) &&
-        incoming().username == existing().username &&
-        incoming().uid == existing().uid &&
-        incoming().accountType == existing().accountType
-      );
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId) || isAdmin();
     }
 
     // Chat Rules
     match /chats/{chatId} {
       allow get: if isSignedIn() && (resource == null || request.auth.uid in resource.data.participants);
-      allow list: if isSignedIn() && request.auth.uid in resource.data.participants;
-      
-      allow create: if isSignedIn() && 
-                    request.auth.uid in incoming().participants &&
-                    (!incoming().isGroup || (incoming().groupName is string && incoming().groupName.size() >= 3));
-      
-      allow update: if isSignedIn() && request.auth.uid in existing().participants && (
-        incoming().diff(existing()).affectedKeys().hasOnly(['lastMessage', 'lastMessageAt', 'updatedAt', 'groupName', 'groupAvatar', 'typing'])
-      );
+      allow list: if isSignedIn() && (resource == null || request.auth.uid in resource.data.participants);
+      allow create: if isSignedIn() && request.auth.uid in incoming().participants;
+      allow update: if isSignedIn() && request.auth.uid in existing().participants;
 
       match /messages/{messageId} {
         allow read: if isParticipant(chatId);
-        allow create: if isParticipant(chatId) &&
-                      incoming().senderId == request.auth.uid &&
-                      incoming().createdAt == request.time;
-        allow update: if isParticipant(chatId) &&
-                      incoming().diff(existing()).affectedKeys().hasOnly(['reactions', 'status']);
+        allow create: if isParticipant(chatId) && (incoming().senderId == request.auth.uid);
+        allow update: if isParticipant(chatId) && incoming().diff(existing()).affectedKeys().hasOnly(['reactions', 'status']);
       }
+    }
+
+    // Store Rules
+    match /stores/{ownerId} {
+      allow read: if true;
+      allow write: if isOwner(ownerId);
+
+      match /products/{productId} {
+        allow read: if true;
+        allow write: if isOwner(ownerId);
+      }
+      match /services/{serviceId} {
+        allow read: if true;
+        allow write: if isOwner(ownerId);
+      }
+      match /appointments/{appId} {
+        allow read: if isOwner(ownerId) || (isSignedIn() && (resource != null && resource.data.userId == request.auth.uid));
+        allow create: if isSignedIn();
+        allow update, delete: if isOwner(ownerId);
+      }
+    }
+
+    // Template Rules
+    match /storeTemplates/{templateId} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
     // Call Rules
     match /calls/{chatId} {
-      allow read: if isParticipant(chatId);
-      allow create: if isParticipant(chatId);
-      allow update: if isParticipant(chatId);
-      allow delete: if isParticipant(chatId);
+      allow read, write: if isParticipant(chatId);
+      
+      match /callerCandidates/{candidateId} {
+        allow read, write: if isParticipant(chatId);
+      }
+      match /calleeCandidates/{candidateId} {
+        allow read, write: if isParticipant(chatId);
+      }
     }
   }
 }

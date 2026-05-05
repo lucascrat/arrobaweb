@@ -43,8 +43,8 @@ export const NameStoreScreen: React.FC<NameStoreScreenProps> = ({ setScreen }) =
   ];
 
   const filteredNames = premiumNames.filter(name => 
-    name.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    name.description.toLowerCase().includes(searchQuery.toLowerCase())
+    (name.username || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (name.description || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const SkeletonItem = () => (

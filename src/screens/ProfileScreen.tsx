@@ -308,6 +308,51 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ setScreen }) => {
           </div>
         </section>
 
+        {/* Developer Mode for Admins */}
+        {profile?.isAdmin && (
+          <section className="glass-card p-6 border border-indigo-500/30 bg-indigo-500/5 flex flex-col gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 flex items-center justify-center text-indigo-400">
+                <Terminal className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-white tracking-tight uppercase">Modo Desenvolvedor</h3>
+                <p className="text-[10px] font-bold text-slate-400">Alterar permissões para testes</p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
+              <div className="flex flex-col">
+                <span className="text-xs font-black text-indigo-400 uppercase tracking-widest">Tipo de Conta</span>
+                <span className="text-[10px] font-bold text-slate-500 mt-0.5">Atual: {profile.accountType}</span>
+              </div>
+              
+              <div className="flex bg-slate-900 p-1 rounded-xl border border-white/10">
+                <button 
+                  onClick={async () => {
+                    if (!user) return;
+                    soundManager.playClick();
+                    await updateDoc(doc(db, 'users', user.uid), { accountType: 'personal' });
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${profile.accountType === 'personal' ? 'bg-indigo-500 text-white shadow-lg' : 'text-slate-500'}`}
+                >
+                  Pessoal
+                </button>
+                <button 
+                  onClick={async () => {
+                    if (!user) return;
+                    soundManager.playClick();
+                    await updateDoc(doc(db, 'users', user.uid), { accountType: 'business' });
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${profile.accountType === 'business' ? 'bg-indigo-500 text-white shadow-lg' : 'text-slate-500'}`}
+                >
+                  Business
+                </button>
+              </div>
+            </div>
+          </section>
+        )}
+
         {/* Menu Items */}
         <section className="space-y-3">
           {menuItems.map((item, i) => (

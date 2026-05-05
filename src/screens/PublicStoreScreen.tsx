@@ -6,6 +6,7 @@ import { Store, MessageCircle, ShoppingBag, Calendar, AtSign, Lock, ArrowRight, 
 
 interface PublicStoreScreenProps {
   slug: string;
+  onClose?: () => void;
 }
 
 interface StoreData {
@@ -22,7 +23,7 @@ interface StoreData {
   displayName: string;
 }
 
-export const PublicStoreScreen: React.FC<PublicStoreScreenProps> = ({ slug }) => {
+export const PublicStoreScreen: React.FC<PublicStoreScreenProps> = ({ slug, onClose }) => {
   const [storeData, setStoreData] = useState<StoreData | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -168,7 +169,12 @@ export const PublicStoreScreen: React.FC<PublicStoreScreenProps> = ({ slug }) =>
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center relative">
+        {onClose && (
+          <button onClick={onClose} className="absolute top-6 left-6 p-3 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 text-white shadow-xl z-[100]">
+            <X className="w-5 h-5"/>
+          </button>
+        )}
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin mx-auto" />
           <p className="mt-4 text-slate-500 font-black uppercase tracking-widest text-[10px]">Carregando loja...</p>
@@ -179,7 +185,12 @@ export const PublicStoreScreen: React.FC<PublicStoreScreenProps> = ({ slug }) =>
 
   if (notFound) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center relative">
+        {onClose && (
+          <button onClick={onClose} className="absolute top-6 left-6 p-3 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 text-white shadow-xl z-[100]">
+            <X className="w-5 h-5"/>
+          </button>
+        )}
         <div className="text-center">
           <div className="w-20 h-20 bg-white/5 rounded-3xl flex items-center justify-center mx-auto mb-4 border border-white/10">
             <Store className="w-10 h-10 text-slate-600" />
@@ -198,6 +209,11 @@ export const PublicStoreScreen: React.FC<PublicStoreScreenProps> = ({ slug }) =>
   if (storeData?.accessCodeEnabled && !accessGranted) {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 relative overflow-hidden">
+        {onClose && (
+          <button onClick={onClose} className="absolute top-6 left-6 p-3 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 text-white shadow-xl z-[100]">
+            <X className="w-5 h-5"/>
+          </button>
+        )}
         <div className="absolute top-[-10%] right-[-5%] w-[300px] h-[300px] bg-indigo-600/20 rounded-full blur-[80px]" />
         <div className="absolute bottom-[10%] left-[-5%] w-[200px] h-[200px] bg-fuchsia-500/10 rounded-full blur-[80px]" />
 
@@ -263,6 +279,11 @@ export const PublicStoreScreen: React.FC<PublicStoreScreenProps> = ({ slug }) =>
 
   return (
     <div className="min-h-screen bg-slate-950 relative overflow-x-hidden">
+      {onClose && (
+        <button onClick={onClose} className="absolute top-6 left-6 z-[100] p-3 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 text-white shadow-xl backdrop-blur-md">
+          <X className="w-5 h-5"/>
+        </button>
+      )}
       {/* Background */}
       <div className="absolute top-0 left-0 right-0 h-72 bg-gradient-to-b from-indigo-900/30 to-transparent pointer-events-none" />
 
@@ -456,6 +477,7 @@ export const PublicStoreScreen: React.FC<PublicStoreScreenProps> = ({ slug }) =>
             </motion.div>
           </motion.div>
         )}
+      </AnimatePresence>
       {/* Scheduling Quiz Modal */}
       <AnimatePresence>
         {showSchedulingQuiz && selectedService && (

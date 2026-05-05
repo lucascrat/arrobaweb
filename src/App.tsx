@@ -1,8 +1,3 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { OnboardingScreen } from './screens/OnboardingScreen';
@@ -19,8 +14,30 @@ import { NameStoreScreen } from './screens/NameStoreScreen';
 import { NotificationsScreen } from './screens/NotificationsScreen';
 import { ProfileScreen } from './screens/ProfileScreen';
 import { CloudflareConfigScreen } from './screens/CloudflareConfigScreen';
+import { PublicStoreScreen } from './screens/PublicStoreScreen';
 import { Screen } from './types';
 import { AuthProvider, useAuth } from './lib/AuthContext';
+
+// Detect if accessed via a professional store subdomain
+function getStoreSlug(): string | null {
+  const hostname = window.location.hostname;
+  // In dev: localhost → no slug. In prod: bianastore.arroba.live → "bianastore"
+  const knownRoots = ['arroba.live', 'www.arroba.live', 'localhost', 'arrobaweb.pages.dev'];
+  if (knownRoots.some(r => hostname === r || hostname.endsWith(`.${r}`) === false && hostname === r)) {
+    return null;
+  }
+  const parts = hostname.split('.');
+  // e.g. bianastore.arroba.live → parts = ['bianastore', 'arroba', 'live']
+  if (parts.length >= 3 && hostname.endsWith('.arroba.live')) {
+    const slug = parts[0];
+    if (slug && slug !== 'www' && slug !== 'admin') {
+      return slug;
+    }
+  }
+  return null;
+}
+
+const storeSlug = getStoreSlug();
 
 function AppContent() {
   const [screen, setScreen] = useState<Screen>('onboarding');
@@ -103,6 +120,18 @@ function AppContent() {
 }
 
 export default function App() {
+  // If accessed via a professional subdomain (e.g. bianastore.arroba.live),
+  // render the public store page directly — no auth required.
+  if (storeSlug) {
+    return (
+      <AuthProvider>
+        <div className="max-w-[480px] mx-auto min-h-screen relative shadow-2xl bg-slate-950 overflow-x-hidden font-manrope">
+          <PublicStoreScreen slug={storeSlug} />
+        </div>
+      </AuthProvider>
+    );
+  }
+
   return (
     <AuthProvider>
       <AppContent />

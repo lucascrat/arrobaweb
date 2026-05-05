@@ -17,6 +17,13 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({ next }) 
   const [storeName, setStoreName] = useState('');
   const [isRegistering, setIsRegistering] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Auto-generate slug from store name
+  const professionalSlug = storeName
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]/g, '')
+    .slice(0, 20);
   
   const handleTypeChange = (type: AccountType) => {
     setAccountType(type);
@@ -73,11 +80,28 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({ next }) 
       const userSnap = await getDoc(userRef);
 
       if (!userSnap.exists()) {
+        // Check slug uniqueness for business accounts
+        if (isBusiness && professionalSlug) {
+          const slugQ = query(
+            collection(db, 'users'),
+            where('professionalSlug', '==', professionalSlug),
+            limit(1)
+          );
+          const slugSnap = await getDocs(slugQ);
+          if (!slugSnap.empty && slugSnap.docs[0].id !== currentUser.uid) {
+            throw new Error(`O nome de loja "${professionalSlug}" já está em uso. Escolha outro nome.`);
+          }
+        }
+
         const userData = {
           uid: currentUser.uid,
           username: cleanUsername,
           accountType,
           storeName: isBusiness ? (storeName.trim() || 'Minha Loja') : null,
+          professionalSlug: isBusiness ? professionalSlug : null,
+          storeMode: isBusiness ? 'store' : null,
+          storeDescription: '',
+          accessCodeEnabled: false,
           email: currentUser.email || '',
           displayName: currentUser.displayName || cleanUsername,
           photoURL: currentUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${currentUser.uid}`,
@@ -181,6 +205,14 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({ next }) 
                       placeholder="Minha Incrível Loja" 
                     />
                   </div>
+                  {professionalSlug && (
+                    <div className="flex items-center gap-2 px-4 py-2 bg-fuchsia-500/10 border border-fuchsia-500/20 rounded-2xl">
+                      <div className="w-2 h-2 bg-fuchsia-400 rounded-full animate-pulse" />
+                      <span className="text-xs font-black text-fuchsia-300">
+                        🌐 {professionalSlug}.arroba.live
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
 

@@ -24,16 +24,16 @@ import {
   Calendar,
   MessageCircle
 } from 'lucide-react';
-import { 
-  collection, 
-  query, 
-  getDocs, 
-  doc, 
-  updateDoc, 
-  addDoc, 
-  deleteDoc, 
-  onSnapshot, 
-  orderBy, 
+import {
+  collection,
+  query,
+  getDocs,
+  doc,
+  updateDoc,
+  addDoc,
+  deleteDoc,
+  onSnapshot,
+  orderBy,
   limit,
   where,
   serverTimestamp
@@ -42,7 +42,7 @@ import { db } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
 import { Screen } from '../types';
 import { soundManager } from '../lib/sounds';
-import { seedTemplates } from '../lib/seed';
+import { seedTemplates, INITIAL_TEMPLATES_COUNT, CATEGORY_OPTIONS, THEME_PRESETS } from '../lib/seed';
 
 interface AdminDashboardProps {
   setScreen: (s: Screen) => void;
@@ -64,13 +64,24 @@ interface StoreTemplate {
   name: string;
   description: string;
   category: string;
+  themeColor?: string;
   config: {
     storeMode: 'store' | 'store+ai' | 'scheduling';
     welcomeMessage: string;
     aiPrompt?: string;
   };
+  sampleProducts?: Array<{ name: string; price: number; description?: string; image?: string; category?: string }>;
+  sampleServices?: Array<{ name: string; price: number; duration: number; description?: string }>;
   thumbnail?: string;
 }
+
+const EMPTY_FORM: Omit<StoreTemplate, 'id'> = {
+  name: '',
+  description: '',
+  category: 'Beleza',
+  themeColor: 'indigo',
+  config: { storeMode: 'scheduling', welcomeMessage: '', aiPrompt: '' },
+};
 
 export const AdminDashboardScreen: React.FC<AdminDashboardProps> = ({ setScreen }) => {
   const { profile } = useAuth();
@@ -82,6 +93,7 @@ export const AdminDashboardScreen: React.FC<AdminDashboardProps> = ({ setScreen 
   const [showTemplateForm, setShowTemplateForm] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<StoreTemplate | null>(null);
   const [saving, setSaving] = useState(false);
+  const [templateForm, setTemplateForm] = useState<Omit<StoreTemplate, 'id'>>(EMPTY_FORM);
 
   // Stats
   const stats = [
@@ -101,33 +113,77 @@ export const AdminDashboardScreen: React.FC<AdminDashboardProps> = ({ setScreen 
     // 2. Fetch Templates
     const tq = query(collection(db, 'storeTemplates'), orderBy('name', 'asc'));
     const unsubTemplates = onSnapshot(tq, (snap) => {
-      setTemplates(snap.docs.map(d => ({ id: d.id, ...d.data() } as StoreTemplate)));
+      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as StoreTemplate));
+      setTemplates(docs);
+      
+      // Auto-seed if empty
+      if (docs.length === 0 && !loading) {
+        seedTemplates(true);
+      }
+      
       setLoading(false);
     });
 
     return () => { unsubUsers(); unsubTemplates(); };
   }, []);
 
-  const handleCreateTemplate = async (templateData: any) => {
+  const openTemplateEditor = (tmpl: StoreTemplate | null) => {
+    setEditingTemplate(tmpl);
+    setTemplateForm(tmpl
+      ? {
+          name: tmpl.name || '',
+          description: tmpl.description || '',
+          category: tmpl.category || 'Beleza',
+          themeColor: tmpl.themeColor || 'indigo',
+          config: {
+            storeMode: tmpl.config?.storeMode || 'scheduling',
+            welcomeMessage: tmpl.config?.welcomeMessage || '',
+            aiPrompt: tmpl.config?.aiPrompt || '',
+          },
+          sampleProducts: tmpl.sampleProducts || [],
+          sampleServices: tmpl.sampleServices || [],
+        }
+      : EMPTY_FORM);
+    setShowTemplateForm(true);
+  };
+
+  const handleCreateTemplate = async () => {
+    if (!templateForm.name.trim() || !templateForm.description.trim()) {
+      alert('Nome e descrição são obrigatórios.');
+      return;
+    }
     setSaving(true);
     try {
+      const payload: any = {
+        name: templateForm.name.trim(),
+        description: templateForm.description.trim(),
+        category: templateForm.category,
+        themeColor: templateForm.themeColor || 'indigo',
+        config: {
+          storeMode: templateForm.config.storeMode,
+          welcomeMessage: templateForm.config.welcomeMessage?.trim() || 'Bem-vindo à nossa loja!',
+          aiPrompt: templateForm.config.aiPrompt?.trim() || '',
+        },
+        sampleProducts: templateForm.sampleProducts || [],
+        sampleServices: templateForm.sampleServices || [],
+        updatedAt: serverTimestamp(),
+      };
       if (editingTemplate) {
-        await updateDoc(doc(db, 'storeTemplates', editingTemplate.id), {
-          ...templateData,
-          updatedAt: serverTimestamp()
-        });
+        await updateDoc(doc(db, 'storeTemplates', editingTemplate.id), payload);
       } else {
         await addDoc(collection(db, 'storeTemplates'), {
-          ...templateData,
-          createdAt: serverTimestamp()
+          ...payload,
+          createdAt: serverTimestamp(),
         });
       }
       setShowTemplateForm(false);
       setEditingTemplate(null);
+      setTemplateForm(EMPTY_FORM);
       soundManager.playChime();
     } catch (err) {
+      console.error(err);
       soundManager.playAlert();
-      alert('Erro ao salvar modelo.');
+      alert('Erro ao salvar modelo. Verifique se você tem permissão de admin.');
     } finally {
       setSaving(false);
     }
@@ -227,7 +283,7 @@ export const AdminDashboardScreen: React.FC<AdminDashboardProps> = ({ setScreen 
     );
   };
 
-  if (profile?.accountType !== 'business' && !profile?.isAdmin && profile?.email !== 'lrlucasrafael11@gmail.com') {
+  if (!profile?.isAdmin) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 text-center">
         <div>
@@ -391,19 +447,19 @@ export const AdminDashboardScreen: React.FC<AdminDashboardProps> = ({ setScreen 
                     <p className="text-[10px] text-slate-600 font-bold uppercase tracking-wider">Crie e visualize estilos de lojas</p>
                   </div>
                   <div className="flex gap-2">
-                    {templates.length === 0 && (
+                    {templates.length < INITIAL_TEMPLATES_COUNT && (
                       <button 
                         onClick={async () => {
-                          await seedTemplates();
+                          await seedTemplates(true);
                           soundManager.playChime();
                         }}
                         className="px-4 py-2 border border-indigo-500/30 text-indigo-400 rounded-xl text-[10px] font-black uppercase tracking-widest active:scale-95"
                       >
-                        Carregar Padrão
+                        Resetar Padrões
                       </button>
                     )}
-                    <button 
-                      onClick={() => { setEditingTemplate(null); setShowTemplateForm(true); }}
+                    <button
+                      onClick={() => openTemplateEditor(null)}
                       className="px-4 py-2 bg-indigo-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-lg active:scale-95"
                     >
                       <Plus className="w-3.5 h-3.5" /> Novo
@@ -415,7 +471,7 @@ export const AdminDashboardScreen: React.FC<AdminDashboardProps> = ({ setScreen 
                 <div className="text-center py-20 border-2 border-dashed border-white/5 rounded-[2.5rem]">
                   <Layout className="w-12 h-12 text-slate-800 mx-auto mb-4" />
                   <p className="text-slate-500 font-bold text-sm">Nenhum modelo cadastrado</p>
-                  <button onClick={() => setShowTemplateForm(true)} className="mt-4 text-indigo-400 font-black text-xs uppercase tracking-widest">Clique para criar o primeiro</button>
+                  <button onClick={() => openTemplateEditor(null)} className="mt-4 text-indigo-400 font-black text-xs uppercase tracking-widest">Clique para criar o primeiro</button>
                 </div>
               ) : (
                 <div className="space-y-10">
@@ -446,7 +502,7 @@ export const AdminDashboardScreen: React.FC<AdminDashboardProps> = ({ setScreen 
                                   </div>
                                 </div>
                                 <div className="flex gap-1">
-                                  <button onClick={() => { setEditingTemplate(tmpl); setShowTemplateForm(true); }} className="p-2.5 bg-white/5 rounded-xl text-slate-500 hover:text-white transition-colors active:scale-90"><Edit className="w-4 h-4"/></button>
+                                  <button onClick={() => openTemplateEditor(tmpl)} className="p-2.5 bg-white/5 rounded-xl text-slate-500 hover:text-white transition-colors active:scale-90"><Edit className="w-4 h-4"/></button>
                                   <button onClick={() => handleDeleteTemplate(tmpl.id)} className="p-2.5 bg-white/5 rounded-xl text-slate-500 hover:text-red-400 transition-colors active:scale-90"><Trash2 className="w-4 h-4"/></button>
                                 </div>
                               </div>
@@ -475,65 +531,108 @@ export const AdminDashboardScreen: React.FC<AdminDashboardProps> = ({ setScreen 
       <AnimatePresence>
         {showTemplateForm && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-end">
-            <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} className="w-full bg-slate-900 rounded-t-[2.5rem] max-h-[90vh] overflow-y-auto">
+            <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} className="w-full bg-slate-900 rounded-t-[2.5rem] max-h-[92vh] overflow-y-auto">
               <div className="p-8 space-y-6">
-                <div className="flex justify-between items-center mb-4">
+                <div className="flex justify-between items-center mb-2">
                   <h3 className="text-xl font-black text-white">{editingTemplate ? 'Editar Modelo' : 'Novo Modelo'}</h3>
                   <button onClick={() => setShowTemplateForm(false)} className="p-2 text-slate-400"><X className="w-6 h-6"/></button>
                 </div>
-                
+
                 <div className="space-y-4">
                   <div>
                     <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Nome do Modelo</label>
-                    <input 
-                      defaultValue={editingTemplate?.name}
-                      id="tmpl-name"
-                      placeholder="Ex: Barbearia Moderna"
-                      className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-white font-bold"
+                    <input
+                      value={templateForm.name}
+                      onChange={(e) => setTemplateForm(f => ({ ...f, name: e.target.value }))}
+                      placeholder="Ex: ✂️ Barbearia Moderna"
+                      className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-white font-bold focus:outline-none focus:border-indigo-500/50"
                     />
                   </div>
+
                   <div>
                     <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Descrição Curta</label>
-                    <textarea 
-                      defaultValue={editingTemplate?.description}
-                      id="tmpl-desc"
+                    <textarea
+                      value={templateForm.description}
+                      onChange={(e) => setTemplateForm(f => ({ ...f, description: e.target.value }))}
                       placeholder="Ideal para barbeiros que buscam agendamento rápido..."
-                      className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-white font-medium h-24 resize-none"
+                      className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-white font-medium h-24 resize-none focus:outline-none focus:border-indigo-500/50"
                     />
                   </div>
+
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Categoria</label>
-                      <select id="tmpl-cat" defaultValue={editingTemplate?.category || 'Beleza'} className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-white font-bold appearance-none">
-                        <option value="Beleza">Beleza</option>
-                        <option value="Alimentação">Alimentação</option>
-                        <option value="Varejo">Varejo</option>
-                        <option value="Serviços">Serviços</option>
+                      <select
+                        value={templateForm.category}
+                        onChange={(e) => setTemplateForm(f => ({ ...f, category: e.target.value }))}
+                        className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-white font-bold appearance-none focus:outline-none focus:border-indigo-500/50"
+                      >
+                        {CATEGORY_OPTIONS.map(c => (
+                          <option key={c} value={c} className="bg-slate-900">{c}</option>
+                        ))}
                       </select>
                     </div>
                     <div>
                       <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Modo Padrão</label>
-                      <select id="tmpl-mode" defaultValue={editingTemplate?.config.storeMode || 'scheduling'} className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-white font-bold appearance-none">
-                        <option value="store">Loja</option>
-                        <option value="store+ai">Loja + IA</option>
-                        <option value="scheduling">Agendamento</option>
+                      <select
+                        value={templateForm.config.storeMode}
+                        onChange={(e) => setTemplateForm(f => ({ ...f, config: { ...f.config, storeMode: e.target.value as any } }))}
+                        className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-white font-bold appearance-none focus:outline-none focus:border-indigo-500/50"
+                      >
+                        <option value="store" className="bg-slate-900">Loja</option>
+                        <option value="store+ai" className="bg-slate-900">Loja + IA</option>
+                        <option value="scheduling" className="bg-slate-900">Agendamento</option>
                       </select>
                     </div>
                   </div>
+
+                  <div>
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Tema (cor)</label>
+                    <div className="flex flex-wrap gap-2">
+                      {Object.keys(THEME_PRESETS).map(key => (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => setTemplateForm(f => ({ ...f, themeColor: key }))}
+                          className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${
+                            templateForm.themeColor === key
+                              ? 'bg-indigo-500 text-white border-indigo-400 shadow-lg'
+                              : 'bg-white/5 text-slate-400 border-white/10'
+                          }`}
+                        >
+                          {key}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Mensagem de Boas-vindas</label>
+                    <textarea
+                      value={templateForm.config.welcomeMessage}
+                      onChange={(e) => setTemplateForm(f => ({ ...f, config: { ...f.config, welcomeMessage: e.target.value } }))}
+                      placeholder="Ex: Bem-vindo à nossa loja! Confira nossas novidades."
+                      className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-white font-medium h-20 resize-none focus:outline-none focus:border-indigo-500/50"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2 flex items-center gap-2">
+                      <Sparkles className="w-3.5 h-3.5 text-fuchsia-400" /> Prompt do Atendente IA
+                    </label>
+                    <textarea
+                      value={templateForm.config.aiPrompt || ''}
+                      onChange={(e) => setTemplateForm(f => ({ ...f, config: { ...f.config, aiPrompt: e.target.value } }))}
+                      placeholder="Você é o atendente da loja. Seja simpático, sugira produtos..."
+                      className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-white font-medium h-28 resize-none focus:outline-none focus:border-fuchsia-500/50"
+                    />
+                    <p className="text-[9px] text-slate-600 mt-1 px-1">Define a personalidade da IA quando o lojista usar Loja + IA.</p>
+                  </div>
                 </div>
 
-                <button 
+                <button
                   disabled={saving}
-                  onClick={() => {
-                    const name = (document.getElementById('tmpl-name') as HTMLInputElement).value;
-                    const description = (document.getElementById('tmpl-desc') as HTMLTextAreaElement).value;
-                    const category = (document.getElementById('tmpl-cat') as HTMLSelectElement).value;
-                    const storeMode = (document.getElementById('tmpl-mode') as HTMLSelectElement).value;
-                    handleCreateTemplate({
-                      name, description, category,
-                      config: { storeMode, welcomeMessage: 'Bem-vindo ao nosso espaço!' }
-                    });
-                  }}
+                  onClick={handleCreateTemplate}
                   className="w-full bg-indigo-500 text-white font-black py-5 rounded-[1.5rem] flex items-center justify-center gap-3 shadow-primary-glow active:scale-95 disabled:opacity-50"
                 >
                   {saving ? <Loader className="w-5 h-5 animate-spin" /> : <><Save className="w-5 h-5" /> Salvar Modelo</>}

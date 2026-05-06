@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { soundManager } from '../lib/sounds';
 import { auth, signInWithGoogle, db } from '../lib/firebase';
 import { doc, setDoc, serverTimestamp, query, collection, where, getDocs, limit, getDoc, updateDoc } from 'firebase/firestore';
+import { normalizeSlug, validateSlug } from '../lib/slug';
 
 interface RegistrationScreenProps {
   next: () => void;
@@ -18,12 +19,8 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({ next }) 
   const [isRegistering, setIsRegistering] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Auto-generate slug from store name
-  const professionalSlug = storeName
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]/g, '')
-    .slice(0, 20);
+  // Auto-generate slug from store name (preserva hífens, remove acentos)
+  const professionalSlug = normalizeSlug(storeName);
   
   const handleTypeChange = (type: AccountType) => {
     setAccountType(type);
@@ -82,14 +79,9 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({ next }) 
       if (!userSnap.exists()) {
         // Check slug uniqueness for business accounts
         if (isBusiness && professionalSlug) {
-          const slugQ = query(
-            collection(db, 'users'),
-            where('professionalSlug', '==', professionalSlug),
-            limit(1)
-          );
-          const slugSnap = await getDocs(slugQ);
-          if (!slugSnap.empty && slugSnap.docs[0].id !== currentUser.uid) {
-            throw new Error(`O nome de loja "${professionalSlug}" já está em uso. Escolha outro nome.`);
+          const check = await validateSlug(professionalSlug, currentUser.uid);
+          if (!check.ok) {
+            throw new Error(check.message);
           }
         }
 

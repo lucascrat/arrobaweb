@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowLeft, Plus, Trash2, Edit3, Package, DollarSign, Tag, Image, Loader, CheckCircle, X, Store, Eye, Link, Copy, ToggleLeft, ToggleRight, Calendar, MessageCircle, ShoppingBag } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Edit3, Package, DollarSign, Tag, Image, Loader, CheckCircle, X, Store, Eye, Link, Copy, ToggleLeft, ToggleRight, Calendar, MessageCircle, ShoppingBag, Layout, ExternalLink, AlertCircle } from 'lucide-react';
 import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, query, orderBy, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
 import { uploadToR2 } from '../lib/r2';
 import { Screen } from '../types';
 import { soundManager } from '../lib/sounds';
+import { normalizeSlug, validateSlug } from '../lib/slug';
 
 interface StoreManagerScreenProps {
   setScreen: (s: Screen) => void;
@@ -54,6 +55,7 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
   const [savingSettings, setSavingSettings] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
   const [availableTemplates, setAvailableTemplates] = useState<any[]>([]);
+  const [slugStatus, setSlugStatus] = useState<{ state: 'idle' | 'checking' | 'ok' | 'error'; message?: string }>({ state: 'idle' });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Form state
@@ -108,48 +110,105 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
     }
   }, [loading, products.length, services.length]);
 
+  // Debounced slug validation enquanto o lojista digita
+  useEffect(() => {
+    if (!user) return;
+    const slug = normalizeSlug(professionalSlug);
+    if (!slug) {
+      setSlugStatus({ state: 'idle' });
+      return;
+    }
+    if (slug === (profile?.professionalSlug || '')) {
+      setSlugStatus({ state: 'ok', message: 'Link atual.' });
+      return;
+    }
+    setSlugStatus({ state: 'checking' });
+    const t = setTimeout(async () => {
+      const result = await validateSlug(slug, user.uid);
+      if (result.ok) {
+        setSlugStatus({ state: 'ok', message: 'Disponível!' });
+      } else {
+        setSlugStatus({ state: 'error', message: result.message });
+      }
+    }, 500);
+    return () => clearTimeout(t);
+  }, [professionalSlug, user, profile?.professionalSlug]);
+
   const handleApplyTemplate = async (template: any) => {
     if (!user) return;
     setSaving(true);
     try {
-      // 1. Update Profile Settings
+      // 1. Garante que existe um slug; se ausente, gera a partir do storeName ou username
+      let nextSlug = profile?.professionalSlug;
+      if (!nextSlug) {
+        const candidate = normalizeSlug(profile?.storeName || profile?.username || `loja-${user.uid.slice(0, 6)}`);
+        const check = await validateSlug(candidate, user.uid);
+        nextSlug = check.ok ? check.slug : `${candidate}-${user.uid.slice(0, 4)}`;
+      }
+
+      // 2. Atualiza perfil com modo, descrição, prompt e tema
       await updateDoc(doc(db, 'users', user.uid), {
         storeMode: template.config.storeMode,
         storeDescription: template.description,
-        'config.welcomeMessage': template.config.welcomeMessage,
-        'config.aiPrompt': template.config.aiPrompt,
-        updatedAt: serverTimestamp()
+        templateId: template.id,
+        themeColor: template.themeColor || 'indigo',
+        professionalSlug: nextSlug,
+        onboardingCompleted: true,
+        'config.welcomeMessage': template.config.welcomeMessage || '',
+        'config.aiPrompt': template.config.aiPrompt || '',
+        updatedAt: serverTimestamp(),
       });
       setStoreMode(template.config.storeMode);
       setStoreDescription(template.description);
-      
-      // 2. Add a sample product or service based on template
-      if (template.config.storeMode === 'scheduling') {
-        await addDoc(collection(db, 'stores', user.uid, 'services'), {
-          name: 'Serviço Demonstrativo',
-          price: 50,
-          duration: '30',
-          description: 'Este é um serviço exemplo do seu novo modelo.',
-          active: true,
-          createdAt: serverTimestamp()
-        });
+      setProfessionalSlug(nextSlug || '');
+
+      // 3. Popula produtos/serviços de exemplo do template (se houver)
+      const samplesP = (template.sampleProducts || []) as any[];
+      const samplesS = (template.sampleServices || []) as any[];
+
+      if (samplesP.length === 0 && samplesS.length === 0) {
+        // Fallback: cria 1 item demonstrativo conforme o modo
+        if (template.config.storeMode === 'scheduling') {
+          await addDoc(collection(db, 'stores', user.uid, 'services'), {
+            name: 'Serviço Demonstrativo', price: 50, duration: 30,
+            description: 'Edite ou exclua este serviço de exemplo.',
+            active: true, createdAt: serverTimestamp(),
+          });
+        } else {
+          await addDoc(collection(db, 'stores', user.uid, 'products'), {
+            name: 'Produto Exemplo', price: 99.9, category: 'Geral',
+            description: 'Edite ou exclua este produto de exemplo.',
+            image: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=500',
+            active: true, createdAt: serverTimestamp(),
+          });
+        }
       } else {
-        await addDoc(collection(db, 'stores', user.uid, 'products'), {
-          name: 'Produto Exemplo',
-          price: 99.90,
-          description: 'Este é um produto exemplo do seu novo modelo.',
-          image: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=500',
-          category: 'Geral',
-          active: true,
-          createdAt: serverTimestamp()
-        });
+        for (const p of samplesP) {
+          await addDoc(collection(db, 'stores', user.uid, 'products'), {
+            name: p.name, price: Number(p.price) || 0,
+            description: p.description || '', image: p.image || '',
+            category: p.category || 'Geral', active: true,
+            createdAt: serverTimestamp(),
+          });
+        }
+        for (const s of samplesS) {
+          await addDoc(collection(db, 'stores', user.uid, 'services'), {
+            name: s.name, price: Number(s.price) || 0,
+            duration: Number(s.duration) || 30, description: s.description || '',
+            active: true, createdAt: serverTimestamp(),
+          });
+        }
       }
 
       setShowWizard(false);
       soundManager.playChime();
       setSuccessMsg('Modelo aplicado com sucesso!');
+      setTimeout(() => setSuccessMsg(''), 3000);
     } catch (err) {
+      console.error(err);
       soundManager.playAlert();
+      setSuccessMsg('Erro ao aplicar modelo.');
+      setTimeout(() => setSuccessMsg(''), 3000);
     } finally {
       setSaving(false);
     }
@@ -283,26 +342,69 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
     if (!user) return;
     setSavingSettings(true);
     try {
+      // Valida slug antes de salvar
+      const desiredSlug = normalizeSlug(professionalSlug);
+      let finalSlug = profile?.professionalSlug || '';
+      if (desiredSlug && desiredSlug !== profile?.professionalSlug) {
+        const check = await validateSlug(desiredSlug, user.uid);
+        if (!check.ok) {
+          setSuccessMsg(check.message);
+          setSlugStatus({ state: 'error', message: check.message });
+          soundManager.playAlert();
+          setTimeout(() => setSuccessMsg(''), 3000);
+          setSavingSettings(false);
+          return;
+        }
+        finalSlug = check.slug;
+      } else if (desiredSlug) {
+        finalSlug = desiredSlug;
+      }
+
       await updateDoc(doc(db, 'users', user.uid), {
         accessCodeEnabled,
         accessCode: accessCode.trim().toUpperCase(),
         storeMode,
         storeDescription,
         efiConfig,
-        professionalSlug: professionalSlug.trim().toLowerCase(),
-        updatedAt: serverTimestamp()
+        professionalSlug: finalSlug,
+        updatedAt: serverTimestamp(),
       });
+      setProfessionalSlug(finalSlug);
       setSuccessMsg('Configurações salvas!');
       soundManager.playSent();
       setTimeout(() => setSuccessMsg(''), 3000);
-    } catch {
+    } catch (err) {
+      console.error(err);
       soundManager.playAlert();
+      setSuccessMsg('Erro ao salvar configurações.');
+      setTimeout(() => setSuccessMsg(''), 3000);
     } finally {
       setSavingSettings(false);
     }
   };
 
-  const storeLink = `https://${profile?.professionalSlug || 'sua-loja'}.arroba.live`;
+  const activeSlug = profile?.professionalSlug || '';
+  const storeLink = activeSlug ? `https://${activeSlug}.arroba.live` : '';
+  const handleCopyLink = () => {
+    if (!storeLink) {
+      setSuccessMsg('Defina um link primeiro nas configurações.');
+      setTab('settings');
+      setTimeout(() => setSuccessMsg(''), 2500);
+      return;
+    }
+    navigator.clipboard.writeText(storeLink);
+    setSuccessMsg('Link copiado!');
+    setTimeout(() => setSuccessMsg(''), 2000);
+  };
+  const handleOpenStore = () => {
+    if (!storeLink) {
+      setSuccessMsg('Defina um link primeiro nas configurações.');
+      setTab('settings');
+      setTimeout(() => setSuccessMsg(''), 2500);
+      return;
+    }
+    window.open(storeLink, '_blank', 'noopener,noreferrer');
+  };
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col pb-32">
@@ -412,17 +514,33 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
         {tab === 'products' && (
           <div className="space-y-4">
             {/* Store Link Banner */}
-            <div className="bg-fuchsia-500/10 border border-fuchsia-500/20 rounded-2xl p-4 flex items-center justify-between">
-              <div>
+            <div className="bg-fuchsia-500/10 border border-fuchsia-500/20 rounded-2xl p-4 flex items-center justify-between gap-3">
+              <div className="min-w-0">
                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Link da sua loja</p>
-                <p className="text-fuchsia-300 font-black text-sm">{profile?.professionalSlug || 'sua-loja'}.arroba.live</p>
+                {activeSlug ? (
+                  <p className="text-fuchsia-300 font-black text-sm truncate">{activeSlug}.arroba.live</p>
+                ) : (
+                  <button onClick={() => setTab('settings')} className="text-amber-300 font-black text-xs underline">
+                    Definir link agora
+                  </button>
+                )}
               </div>
-              <button
-                onClick={() => { navigator.clipboard.writeText(storeLink); setSuccessMsg('Link copiado!'); setTimeout(() => setSuccessMsg(''), 2000); }}
-                className="p-2 bg-fuchsia-500/20 rounded-xl text-fuchsia-400 active:scale-90 transition-transform"
-              >
-                <Copy className="w-4 h-4" />
-              </button>
+              <div className="flex gap-2 flex-shrink-0">
+                <button
+                  onClick={handleCopyLink}
+                  className="p-2 bg-fuchsia-500/20 rounded-xl text-fuchsia-400 active:scale-90 transition-transform"
+                  title="Copiar link"
+                >
+                  <Copy className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={handleOpenStore}
+                  className="p-2 bg-fuchsia-500/20 rounded-xl text-fuchsia-400 active:scale-90 transition-transform"
+                  title="Abrir loja"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
             {loading ? (
@@ -676,15 +794,56 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
             {/* Custom Link */}
             <div>
               <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Link da Loja</label>
-              <div className="flex items-center bg-white/5 border border-white/10 rounded-2xl overflow-hidden focus-within:border-fuchsia-500/50">
+              <div className={`flex items-center bg-white/5 border rounded-2xl overflow-hidden transition-colors ${
+                slugStatus.state === 'error' ? 'border-red-500/50' :
+                slugStatus.state === 'ok' ? 'border-emerald-500/50' :
+                'border-white/10 focus-within:border-fuchsia-500/50'
+              }`}>
                 <input
                   value={professionalSlug}
-                  onChange={(e) => setProfessionalSlug(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''))}
+                  onChange={(e) => setProfessionalSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+                  onBlur={(e) => setProfessionalSlug(normalizeSlug(e.target.value))}
                   placeholder="sua-loja"
                   className="w-full bg-transparent p-4 text-white font-black text-sm focus:outline-none"
                 />
                 <span className="pr-4 text-slate-500 font-bold text-sm">.arroba.live</span>
               </div>
+
+              {/* Feedback de validação */}
+              <div className="mt-2 px-1 min-h-[18px] flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider">
+                {slugStatus.state === 'checking' && (
+                  <><Loader className="w-3 h-3 animate-spin text-slate-400" /><span className="text-slate-400">Verificando...</span></>
+                )}
+                {slugStatus.state === 'ok' && (
+                  <><CheckCircle className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">{slugStatus.message}</span></>
+                )}
+                {slugStatus.state === 'error' && (
+                  <><AlertCircle className="w-3 h-3 text-red-400" /><span className="text-red-400">{slugStatus.message}</span></>
+                )}
+                {slugStatus.state === 'idle' && !professionalSlug && (
+                  <span className="text-slate-600">Mín. 3 caracteres. Apenas letras, números e hífens.</span>
+                )}
+              </div>
+
+              {/* Ações sobre o link atual */}
+              {activeSlug && (
+                <div className="mt-3 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCopyLink}
+                    className="flex-1 py-2.5 bg-white/5 border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-300 flex items-center justify-center gap-2 active:scale-95"
+                  >
+                    <Copy className="w-3.5 h-3.5" /> Copiar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleOpenStore}
+                    className="flex-1 py-2.5 bg-fuchsia-500/10 border border-fuchsia-500/30 rounded-xl text-[10px] font-black uppercase tracking-widest text-fuchsia-300 flex items-center justify-center gap-2 active:scale-95"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" /> Abrir Loja
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Access Code Toggle */}

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { collection, query, where, getDocs, limit, doc, getDoc, onSnapshot, orderBy, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { soundManager } from '../lib/sounds';
 import { Store, MessageCircle, ShoppingBag, Calendar, AtSign, Lock, ArrowRight, Loader, Package, X, CheckCircle, Send, User, QrCode, Copy, Check } from 'lucide-react';
 
 interface PublicStoreScreenProps {

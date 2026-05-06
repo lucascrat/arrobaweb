@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Store, ShoppingBag, Calendar, MessageCircle, ArrowRight, Eye, CheckCircle, Loader } from 'lucide-react';
-import { collection, onSnapshot, query, orderBy, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, doc, updateDoc, serverTimestamp, addDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
 import { soundManager } from '../lib/sounds';
 import { Screen } from '../types';
+import { normalizeSlug, validateSlug } from '../lib/slug';
 
 interface StoreSetupScreenProps {
   setScreen: (s: Screen) => void;
@@ -16,9 +17,14 @@ interface StoreTemplate {
   name: string;
   description: string;
   category: string;
+  themeColor?: string;
   config: {
     storeMode: 'store' | 'store+ai' | 'scheduling';
+    welcomeMessage?: string;
+    aiPrompt?: string;
   };
+  sampleProducts?: Array<{ name: string; price: number; description?: string; image?: string; category?: string }>;
+  sampleServices?: Array<{ name: string; price: number; duration: number; description?: string }>;
 }
 
 export const StoreSetupScreen: React.FC<StoreSetupScreenProps> = ({ setScreen }) => {
@@ -43,15 +49,47 @@ export const StoreSetupScreen: React.FC<StoreSetupScreenProps> = ({ setScreen })
     setApplying(true);
     soundManager.playClick();
     try {
+      // Garante slug — usa o existente ou gera a partir do storeName/username
+      let nextSlug = profile?.professionalSlug;
+      if (!nextSlug) {
+        const candidate = normalizeSlug(profile?.storeName || profile?.username || `loja-${user.uid.slice(0, 6)}`);
+        const check = await validateSlug(candidate, user.uid);
+        nextSlug = check.ok ? check.slug : `${candidate || 'loja'}-${user.uid.slice(0, 4)}`;
+      }
+
       await updateDoc(doc(db, 'users', user.uid), {
         storeMode: tmpl.config.storeMode,
         storeDescription: tmpl.description,
         templateId: tmpl.id,
+        themeColor: tmpl.themeColor || 'indigo',
+        professionalSlug: nextSlug,
+        'config.welcomeMessage': tmpl.config.welcomeMessage || '',
+        'config.aiPrompt': tmpl.config.aiPrompt || '',
         onboardingCompleted: true,
-        updatedAt: serverTimestamp()
+        updatedAt: serverTimestamp(),
       });
+
+      // Popula amostras se o modelo trouxer
+      const samplesP = tmpl.sampleProducts || [];
+      const samplesS = tmpl.sampleServices || [];
+      for (const p of samplesP) {
+        await addDoc(collection(db, 'stores', user.uid, 'products'), {
+          name: p.name, price: Number(p.price) || 0,
+          description: p.description || '', image: p.image || '',
+          category: p.category || 'Geral', active: true,
+          createdAt: serverTimestamp(),
+        });
+      }
+      for (const s of samplesS) {
+        await addDoc(collection(db, 'stores', user.uid, 'services'), {
+          name: s.name, price: Number(s.price) || 0,
+          duration: Number(s.duration) || 30, description: s.description || '',
+          active: true, createdAt: serverTimestamp(),
+        });
+      }
+
       soundManager.playSent();
-      setScreen('chat-list');
+      setScreen('store-manager');
     } catch (err) {
       console.error(err);
       soundManager.playAlert();

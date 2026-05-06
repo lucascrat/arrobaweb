@@ -57,17 +57,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         window.addEventListener('visibilitychange', handleVisibilityChange);
         window.addEventListener('beforeunload', () => setOnlineStatus(false));
 
+        // Admin allowlist (e-mails reconhecidos como administradores)
+        const ADMIN_EMAILS = [
+          'lrlucasrafael11@gmail.com',
+          'lucasrafaellrl11@gmail.com',
+        ];
+
         // Use onSnapshot for real-time profile updates
-        const unsubProfile = onSnapshot(userRef, (docSnap) => {
+        const unsubProfile = onSnapshot(userRef, async (docSnap) => {
           if (docSnap.exists()) {
             const data = docSnap.data();
-            // Admin Logic
-            const isAdmin = 
-              user.email === 'lrlucasrafael11@gmail.com' || 
-              data.isAdmin === true || 
+            const emailFromAuth = (user.email || '').toLowerCase();
+            const emailFromDoc = (data.email || '').toLowerCase();
+            const isAdmin =
+              ADMIN_EMAILS.includes(emailFromAuth) ||
+              ADMIN_EMAILS.includes(emailFromDoc) ||
+              data.isAdmin === true ||
               data.role === 'admin';
-            
-            setProfile({ ...data, isAdmin });
+
+            // Persiste a flag isAdmin no documento se vier do allowlist
+            // (garante que regras Firestore que checam data.isAdmin funcionem)
+            if (isAdmin && data.isAdmin !== true) {
+              try {
+                await updateDoc(userRef, { isAdmin: true, role: 'admin' });
+              } catch (e) {
+                // sem permissão — segue só com flag em memória
+              }
+            }
+
+            setProfile({ ...data, email: data.email || user.email || '', isAdmin });
             
             // Sync Sound Settings
             if (data.notificationSettings?.soundEnabled !== undefined) {

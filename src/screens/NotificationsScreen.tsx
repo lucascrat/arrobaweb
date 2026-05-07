@@ -4,8 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Screen } from '../types';
 import { soundManager } from '../lib/sounds';
 import { useAuth } from '../lib/AuthContext';
-import { doc, updateDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 
 interface NotificationsScreenProps {
   setScreen: (screen: Screen) => void;
@@ -31,18 +30,17 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({ setScr
   const [activeTab, setActiveTab] = useState<'all' | NotificationType>('all');
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'week'>('all');
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
-  const soundEnabled = profile?.notificationSettings?.soundEnabled ?? true;
+  const soundEnabled = profile?.notification_settings?.soundEnabled ?? true;
 
   const toggleSound = async () => {
     const newState = !soundEnabled;
     soundManager.playClick();
     if (user) {
       try {
-        await updateDoc(doc(db, 'users', user.uid), {
-          'notificationSettings.soundEnabled': newState
-        });
+        const next = { ...(profile?.notification_settings || {}), soundEnabled: newState };
+        await supabase.from('profiles').update({ notification_settings: next }).eq('id', user.id);
       } catch (err) {
-        console.error("Error updating sound setting:", err);
+        console.error('Error updating sound setting:', err);
       }
     }
   };

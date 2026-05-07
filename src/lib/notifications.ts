@@ -1,90 +1,89 @@
+/**
+ * Push Notifications via Firebase Cloud Messaging.
+ *
+ * O Firebase é usado APENAS para FCM. Tudo que é dado de aplicação
+ * vive no Supabase.
+ *
+ * - Capacitor nativo: registra via @capacitor/push-notifications
+ * - Web: usa firebase/messaging com Service Worker
+ *
+ * O token é salvo em `arroba.fcm_tokens` (chave composta user_id + token).
+ */
 import { PushNotifications } from '@capacitor/push-notifications';
 import { Capacitor } from '@capacitor/core';
 import { getToken, onMessage } from 'firebase/messaging';
 import { getMessagingSafe } from './firebase';
-import { doc, updateDoc, getDoc } from 'firebase/firestore';
-import { db } from './firebase';
+import { supabase } from './supabase';
+
+async function saveToken(userId: string, token: string, platform: 'web' | 'android' | 'ios') {
+  try {
+    await supabase
+      .from('fcm_tokens')
+      .upsert({ user_id: userId, token, platform, updated_at: new Date().toISOString() }, { onConflict: 'user_id,token' });
+  } catch (e) {
+    console.warn('[fcm] save token failed', e);
+  }
+}
 
 export const setupPushNotifications = async (userId: string) => {
   if (Capacitor.isNativePlatform()) {
-    // Native Logic
     let permStatus = await PushNotifications.checkPermissions();
 
     if (permStatus.receive === 'prompt') {
       permStatus = await PushNotifications.requestPermissions();
     }
-
-    if (permStatus.receive !== 'granted') {
-      console.warn('Push notification permission denied');
-      return;
-    }
+    if (permStatus.receive !== 'granted') return;
 
     await PushNotifications.register();
 
-    // On success, we should be able to receive notifications
     PushNotifications.addListener('registration', async (token) => {
-      console.log('Push registration success, token: ' + token.value);
-      const userRef = doc(db, 'users', userId);
-      await updateDoc(userRef, { fcmToken: token.value });
+      const platform: 'android' | 'ios' = Capacitor.getPlatform() === 'ios' ? 'ios' : 'android';
+      await saveToken(userId, token.value, platform);
     });
 
     PushNotifications.addListener('registrationError', (error) => {
-      console.error('Error on registration: ' + JSON.stringify(error));
-    });
-
-    PushNotifications.addListener('pushNotificationReceived', (notification) => {
-      console.log('Push received: ' + JSON.stringify(notification));
-    });
-
-    PushNotifications.addListener('pushNotificationActionPerformed', (notification) => {
-      console.log('Push action performed: ' + JSON.stringify(notification));
+      console.error('FCM registration error', error);
     });
   } else {
-    // Web Logic (already in AuthContext, but could be moved here)
     try {
       const messaging = await getMessagingSafe();
       if (messaging && 'Notification' in window) {
         const permission = await Notification.requestPermission();
-        if (permission === 'granted') {
-          if ('serviceWorker' in navigator) {
-            const registration = await navigator.serviceWorker.register('/sw.js');
-            const token = await getToken(messaging, { 
-              serviceWorkerRegistration: registration,
-            });
-            
-            if (token) {
-              const userRef = doc(db, 'users', userId);
-              await updateDoc(userRef, { fcmToken: token });
-            }
-          }
+        if (permission !== 'granted') return;
+        if (!('serviceWorker' in navigator)) return;
+
+        const registration = await navigator.serviceWorker.register('/sw.js');
+        const token = await getToken(messaging, { serviceWorkerRegistration: registration });
+        if (token) {
+          await saveToken(userId, token, 'web');
         }
+
+        onMessage(messaging, (payload) => {
+          console.log('[fcm] foreground message', payload);
+        });
       }
     } catch (e) {
-      console.warn("Web Messaging setup failed", e);
+      console.warn('[fcm] web setup failed', e);
     }
   }
 };
+
 export const sendPushNotification = async (recipientId: string, title: string, body: string, data?: any) => {
   try {
-    // 1. Get recipient token from Firestore
-    const userSnap = await getDoc(doc(db, 'users', recipientId));
-    if (!userSnap.exists()) return;
-    
-    const { fcmToken } = userSnap.data();
-    if (!fcmToken) return;
+    const { data: tokens } = await supabase
+      .from('fcm_tokens')
+      .select('token')
+      .eq('user_id', recipientId);
+    if (!tokens || tokens.length === 0) return;
 
-    // 2. Call Cloudflare Function to send the push
-    await fetch('/api/notifications/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        recipientToken: fcmToken,
-        title,
-        body,
-        data
+    await Promise.all(tokens.map(t =>
+      fetch('/api/notifications/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipientToken: t.token, title, body, data }),
       })
-    });
+    ));
   } catch (error) {
-    console.error('Failed to send push notification:', error);
+    console.error('[fcm] send failed', error);
   }
 };

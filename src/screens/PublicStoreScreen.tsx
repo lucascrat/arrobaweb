@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { collection, query, where, getDocs, limit, doc, getDoc, onSnapshot, orderBy, addDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 import { soundManager } from '../lib/sounds';
-import { Store, MessageCircle, ShoppingBag, Calendar, AtSign, Lock, ArrowRight, Loader, Package, X, CheckCircle, Send, User, QrCode, Copy, Check } from 'lucide-react';
+import {
+  Store, MessageCircle, ShoppingBag, Calendar, AtSign, Lock, ArrowRight, Loader,
+  Package, X, CheckCircle, Send, User, Copy, Check,
+} from 'lucide-react';
 
 interface PublicStoreScreenProps {
   slug: string;
@@ -11,18 +13,37 @@ interface PublicStoreScreenProps {
 }
 
 interface StoreData {
-  uid: string;
-  storeName: string;
-  username: string;
-  storeMode: 'store' | 'store+ai' | 'scheduling';
-  storeDescription: string;
-  storeLogo: string;
-  photoURL: string;
-  accessCodeEnabled: boolean;
-  accessCode?: string;
-  storeTheme: string;
-  displayName: string;
-  efiConfig?: { active?: boolean; clientId?: string; clientSecret?: string; key?: string };
+  id: string;
+  username: string | null;
+  store_name: string | null;
+  store_mode: 'store' | 'store+ai' | 'scheduling' | null;
+  store_description: string | null;
+  store_logo: string | null;
+  photo_url: string | null;
+  display_name: string | null;
+  theme_color: string | null;
+  access_code_enabled: boolean;
+  access_code: string | null;
+  config: Record<string, any> | null;
+  efi_config: Record<string, any> | null;
+}
+
+interface Product {
+  id: string;
+  name: string;
+  price: number;
+  original_price: number | null;
+  description: string | null;
+  image: string | null;
+  category: string | null;
+}
+
+interface Service {
+  id: string;
+  name: string;
+  price: number;
+  duration: number;
+  description: string | null;
 }
 
 export const PublicStoreScreen: React.FC<PublicStoreScreenProps> = ({ slug, onClose }) => {
@@ -32,702 +53,404 @@ export const PublicStoreScreen: React.FC<PublicStoreScreenProps> = ({ slug, onCl
   const [accessCode, setAccessCode] = useState('');
   const [accessGranted, setAccessGranted] = useState(false);
   const [accessError, setAccessError] = useState('');
-  const [checkingCode, setCheckingCode] = useState(false);
-  const [products, setProducts] = useState<any[]>([]);
-  const [services, setServices] = useState<any[]>([]);
-  const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
-  const [selectedService, setSelectedService] = useState<any | null>(null);
-  const [showSchedulingQuiz, setShowSchedulingQuiz] = useState(false);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [services, setServices] = useState<Service[]>([]);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [selectedService, setSelectedService] = useState<Service | null>(null);
+  const [showSchedulingForm, setShowSchedulingForm] = useState(false);
   const [schedulingData, setSchedulingData] = useState({ name: '', phone: '', time: '' });
   const [schedulingStatus, setSchedulingStatus] = useState<'idle' | 'saving' | 'success'>('idle');
   const [showAiChat, setShowAiChat] = useState(false);
   const [aiMessages, setAiMessages] = useState<any[]>([
-    { id: '1', role: 'ai', text: 'Olá! Sou o assistente virtual da loja. Como posso te ajudar hoje?' }
+    { id: '1', role: 'ai', text: 'Olá! Sou o assistente virtual da loja. Como posso te ajudar hoje?' },
   ]);
   const [aiInput, setAiInput] = useState('');
   const [isAiTyping, setIsAiTyping] = useState(false);
-  const [showCheckout, setShowCheckout] = useState(false);
-  const [pixData, setPixData] = useState<any | null>(null);
-  const [checkoutLoading, setCheckoutLoading] = useState(false);
 
   useEffect(() => {
-    const fetchStore = async () => {
-      try {
-        // Search by professionalSlug
-        const q = query(
-          collection(db, 'users'),
-          where('professionalSlug', '==', slug),
-          where('accountType', '==', 'business'),
-          limit(1)
-        );
-        const snap = await getDocs(q);
+    let active = true;
+    (async () => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, username, store_name, store_mode, store_description, store_logo, photo_url, display_name, theme_color, access_code_enabled, access_code, config, efi_config')
+        .eq('professional_slug', slug)
+        .eq('account_type', 'business')
+        .maybeSingle();
 
-        if (snap.empty) {
-          setNotFound(true);
-        } else {
-          const data = snap.docs[0].data() as StoreData;
-          const ownerId = snap.docs[0].id;
-          setStoreData({ ...data, uid: ownerId });
-          if (!data.accessCodeEnabled) setAccessGranted(true);
-
-          // Load products from Firestore
-          const productsSnap = await getDocs(
-            query(collection(db, 'stores', ownerId, 'products'), orderBy('createdAt', 'desc'))
-          );
-          setProducts(
-            productsSnap.docs
-              .map(d => ({ id: d.id, ...d.data() }))
-              .filter((p: any) => p.active !== false)
-          );
-
-          // Load services if in scheduling mode
-          if (data.storeMode === 'scheduling') {
-            const servicesSnap = await getDocs(
-              query(collection(db, 'stores', ownerId, 'services'), orderBy('createdAt', 'desc'))
-            );
-            setServices(
-              servicesSnap.docs
-                .map(d => ({ id: d.id, ...d.data() }))
-                .filter((s: any) => s.active !== false)
-            );
-          }
-        }
-      } catch (err) {
+      if (!active) return;
+      if (error || !data) {
         setNotFound(true);
-      } finally {
         setLoading(false);
+        return;
       }
-    };
+      const store = data as StoreData;
+      setStoreData(store);
+      if (!store.access_code_enabled) setAccessGranted(true);
 
-    fetchStore();
+      const [pr, sv] = await Promise.all([
+        supabase.from('products').select('*').eq('owner_id', store.id).eq('active', true).order('created_at', { ascending: false }),
+        supabase.from('services').select('*').eq('owner_id', store.id).eq('active', true).order('created_at', { ascending: false }),
+      ]);
+      if (!active) return;
+      setProducts((pr.data as Product[]) || []);
+      setServices((sv.data as Service[]) || []);
+      setLoading(false);
+    })();
+    return () => { active = false; };
   }, [slug]);
 
-  const handleAccessCode = () => {
-    if (!accessCode.trim() || !storeData) return;
-    setCheckingCode(true);
-    setAccessError('');
-
-    setTimeout(() => {
-      if (accessCode.trim().toUpperCase() === storeData.accessCode?.toUpperCase()) {
-        setAccessGranted(true);
-      } else {
-        setAccessError('Código inválido. Verifique e tente novamente.');
-      }
-      setCheckingCode(false);
-    }, 800);
+  const handleAccessCheck = () => {
+    if (!storeData) return;
+    if (accessCode.toUpperCase() === (storeData.access_code || '').toUpperCase()) {
+      setAccessGranted(true);
+      setAccessError('');
+      soundManager.playChime();
+    } else {
+      setAccessError('Código inválido.');
+      soundManager.playAlert();
+    }
   };
 
-  const handleConfirmScheduling = async () => {
+  const handleScheduleService = async () => {
     if (!storeData || !selectedService || !schedulingData.name || !schedulingData.phone || !schedulingData.time) return;
     setSchedulingStatus('saving');
-
     try {
-      await addDoc(collection(db, 'stores', storeData.uid, 'appointments'), {
-        serviceId: selectedService.id,
-        serviceName: selectedService.name,
-        customerName: schedulingData.name,
-        customerPhone: schedulingData.phone,
-        appointmentTime: schedulingData.time,
+      const { error } = await supabase.from('appointments').insert({
+        owner_id: storeData.id,
+        service_id: selectedService.id,
+        service_name: selectedService.name,
+        customer_name: schedulingData.name,
+        customer_phone: schedulingData.phone,
+        appointment_time: new Date(schedulingData.time).toISOString(),
         status: 'pending',
-        createdAt: serverTimestamp()
       });
+      if (error) throw error;
       setSchedulingStatus('success');
-      // If payment is enabled, offer to pay now
-      if (storeData.efiConfig?.active) {
-        handleStartCheckout(selectedService);
-      }
+      soundManager.playChime();
       setTimeout(() => {
-        setShowSchedulingQuiz(false);
+        setShowSchedulingForm(false);
+        setSelectedService(null);
         setSchedulingStatus('idle');
         setSchedulingData({ name: '', phone: '', time: '' });
-      }, 3000);
+      }, 2500);
     } catch (err) {
-      alert('Erro ao confirmar agendamento. Tente novamente.');
+      console.error(err);
+      soundManager.playAlert();
       setSchedulingStatus('idle');
     }
   };
-  const handleSendAiMessage = async () => {
-    if (!aiInput.trim() || isAiTyping) return;
-    const userText = aiInput.trim();
+
+  const handleSendAi = async () => {
+    if (!aiInput.trim() || !storeData) return;
+    const userMsg = { id: String(Date.now()), role: 'user', text: aiInput };
+    setAiMessages(m => [...m, userMsg]);
     setAiInput('');
-    setAiMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', text: userText }]);
     setIsAiTyping(true);
 
     try {
-      const response = await fetch('/api/ai/chat', {
+      const res = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: userText,
+          message: aiInput,
           context: {
-            storeName: storeData?.storeName,
-            description: storeData?.storeDescription,
-            products: products.slice(0, 10).map(p => ({ name: p.name, price: p.price, desc: p.description })),
-            services: services.slice(0, 10).map(s => ({ name: s.name, price: s.price, duration: s.duration }))
-          }
-        })
+            storeName: storeData.store_name,
+            description: storeData.store_description,
+            products,
+            services,
+          },
+        }),
       });
-      const data = await response.json();
-      setAiMessages(prev => [...prev, { id: Date.now().toString(), role: 'ai', text: data.reply }]);
+      const data = await res.json();
+      setAiMessages(m => [...m, { id: String(Date.now() + 1), role: 'ai', text: data.reply || 'Desculpe, não consegui responder agora.' }]);
     } catch {
-      setAiMessages(prev => [...prev, { id: Date.now().toString(), role: 'ai', text: 'Desculpe, tive um problema ao processar sua mensagem. Pode repetir?' }]);
+      setAiMessages(m => [...m, { id: String(Date.now() + 1), role: 'ai', text: 'Erro de conexão.' }]);
     } finally {
       setIsAiTyping(false);
     }
   };
 
-  const handleStartCheckout = async (item: any) => {
-    if (!storeData) return;
-    setCheckoutLoading(true);
-    setShowCheckout(true);
-
-    try {
-      const { createPixPayment } = await import('../lib/payments');
-      const data = await createPixPayment(item.price, storeData.uid, `Pedido: ${item.name}`);
-      setPixData(data);
-    } catch (err) {
-      alert('Erro ao gerar pagamento. Tente novamente.');
-      setShowCheckout(false);
-    } finally {
-      setCheckoutLoading(false);
-    }
-  };
-
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center relative">
-        {onClose && (
-          <button onClick={onClose} className="absolute top-6 left-6 p-3 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 text-white shadow-xl z-[100]">
-            <X className="w-5 h-5"/>
-          </button>
-        )}
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin mx-auto" />
-          <p className="mt-4 text-slate-500 font-black uppercase tracking-widest text-[10px]">Carregando loja...</p>
-        </div>
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center">
+        <Loader className="w-10 h-10 text-indigo-400 animate-spin mb-4" />
+        <p className="text-slate-500 font-black uppercase tracking-[0.2em] text-xs">Carregando loja...</p>
       </div>
     );
   }
 
-  if (notFound) {
+  if (notFound || !storeData) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center relative">
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
+        <Store className="w-16 h-16 text-slate-700 mb-4" />
+        <h1 className="text-xl font-black text-white mb-2">Loja não encontrada</h1>
+        <p className="text-slate-500 text-sm">O link <span className="text-indigo-400">{slug}.arroba.live</span> não existe ou foi removido.</p>
         {onClose && (
-          <button onClick={onClose} className="absolute top-6 left-6 p-3 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 text-white shadow-xl z-[100]">
-            <X className="w-5 h-5"/>
-          </button>
+          <button onClick={onClose} className="mt-6 px-6 py-3 bg-indigo-500 text-white rounded-2xl font-black uppercase tracking-widest text-xs">Voltar</button>
         )}
-        <div className="text-center">
-          <div className="w-20 h-20 bg-white/5 rounded-3xl flex items-center justify-center mx-auto mb-4 border border-white/10">
-            <Store className="w-10 h-10 text-slate-600" />
-          </div>
-          <h1 className="text-2xl font-black text-white mb-2">Loja não encontrada</h1>
-          <p className="text-slate-500 text-sm">O link <span className="text-indigo-400 font-bold">{slug}.arroba.live</span> não existe ou foi removido.</p>
-          <a href="https://arroba.live" className="mt-6 inline-flex items-center gap-2 text-indigo-400 font-bold text-sm hover:underline">
-            <AtSign className="w-4 h-4" /> Criar minha loja no Arroba
-          </a>
-        </div>
       </div>
     );
   }
 
-  // Access Code Gate
-  if (storeData?.accessCodeEnabled && !accessGranted) {
+  if (!accessGranted) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 relative overflow-hidden">
-        {onClose && (
-          <button onClick={onClose} className="absolute top-6 left-6 p-3 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 text-white shadow-xl z-[100]">
-            <X className="w-5 h-5"/>
-          </button>
-        )}
-        <div className="absolute top-[-10%] right-[-5%] w-[300px] h-[300px] bg-indigo-600/20 rounded-full blur-[80px]" />
-        <div className="absolute bottom-[10%] left-[-5%] w-[200px] h-[200px] bg-fuchsia-500/10 rounded-full blur-[80px]" />
-
-        <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="w-full max-w-sm z-10"
-        >
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6">
+        <div className="w-full max-w-sm">
           <div className="text-center mb-8">
-            <img
-              src={storeData.storeLogo || storeData.photoURL}
-              className="w-24 h-24 rounded-3xl object-cover mx-auto mb-4 border-4 border-white/10 shadow-2xl"
-              alt={storeData.storeName}
-            />
-            <h1 className="text-2xl font-black text-white">{storeData.storeName}</h1>
-            <p className="text-slate-400 text-sm mt-1">@{storeData.username}</p>
-          </div>
-
-          <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-6">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="w-10 h-10 bg-indigo-500/20 rounded-xl flex items-center justify-center">
-                <Lock className="w-5 h-5 text-indigo-400" />
-              </div>
-              <div>
-                <h2 className="text-white font-bold text-sm">Código de Acesso</h2>
-                <p className="text-slate-400 text-xs">Esta loja é privada. Insira seu código.</p>
-              </div>
+            <div className="w-20 h-20 bg-fuchsia-500/20 rounded-3xl mx-auto mb-4 flex items-center justify-center">
+              <Lock className="w-10 h-10 text-fuchsia-400" />
             </div>
-
-            <input
-              value={accessCode}
-              onChange={(e) => setAccessCode(e.target.value.toUpperCase())}
-              maxLength={6}
-              placeholder="000000"
-              className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-center text-2xl font-black text-white tracking-[0.5em] placeholder-white/20 focus:outline-none focus:border-indigo-500/50 mb-3"
-            />
-
-            {accessError && (
-              <p className="text-red-400 text-xs text-center mb-3 font-bold">{accessError}</p>
-            )}
-
-            <motion.button
-              whileTap={{ scale: 0.97 }}
-              onClick={handleAccessCode}
-              disabled={checkingCode || accessCode.length < 4}
-              className="w-full bg-indigo-500 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50"
-            >
-              {checkingCode ? <Loader className="w-5 h-5 animate-spin" /> : <>Acessar <ArrowRight className="w-4 h-4" /></>}
-            </motion.button>
+            <h1 className="text-3xl font-black text-white mb-2">{storeData.store_name}</h1>
+            <p className="text-slate-400 text-sm font-bold">Loja privada — informe o código de acesso.</p>
           </div>
-        </motion.div>
+          <input
+            value={accessCode}
+            onChange={e => { setAccessCode(e.target.value.toUpperCase()); setAccessError(''); }}
+            placeholder="ABC123"
+            maxLength={6}
+            className="w-full bg-white/5 border border-white/10 rounded-2xl p-5 text-white font-black tracking-[0.4em] text-center text-2xl"
+          />
+          {accessError && <p className="text-red-400 text-xs font-bold text-center mt-3">{accessError}</p>}
+          <button onClick={handleAccessCheck}
+            className="w-full mt-6 bg-fuchsia-500 text-white font-black py-4 rounded-2xl uppercase tracking-widest text-sm flex items-center justify-center gap-2">
+            Entrar <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
       </div>
     );
   }
 
-  // Main Store Page
-  const modeIcon = storeData?.storeMode === 'scheduling' ? <Calendar className="w-5 h-5" /> :
-    storeData?.storeMode === 'store+ai' ? <MessageCircle className="w-5 h-5" /> :
-    <ShoppingBag className="w-5 h-5" />;
-
-  const modeLabel = storeData?.storeMode === 'scheduling' ? 'Agendamentos' :
-    storeData?.storeMode === 'store+ai' ? 'Loja + Atendimento IA' : 'Catálogo de Produtos';
+  const hasProducts = storeData.store_mode !== 'scheduling';
+  const hasServices = storeData.store_mode === 'scheduling';
+  const hasAi = storeData.store_mode === 'store+ai';
+  const welcome = storeData.config?.welcomeMessage || 'Bem-vindo à nossa loja!';
 
   return (
-    <div className="min-h-screen bg-slate-950 relative overflow-x-hidden">
-      {onClose && (
-        <button onClick={onClose} className="absolute top-6 left-6 z-[100] p-3 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 text-white shadow-xl backdrop-blur-md">
-          <X className="w-5 h-5"/>
-        </button>
-      )}
-      {/* Background */}
-      <div className="absolute top-0 left-0 right-0 h-72 bg-gradient-to-b from-indigo-900/30 to-transparent pointer-events-none" />
-
-      {/* Header */}
-      <header className="relative z-10 p-6 pt-12 text-center">
-        <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}>
-          <img
-            src={storeData?.storeLogo || storeData?.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${storeData?.storeName}`}
-            className="w-28 h-28 rounded-3xl object-cover mx-auto mb-4 border-4 border-white/10 shadow-2xl"
-            alt={storeData?.storeName}
-          />
-          <h1 className="text-3xl font-black text-white mb-1">{storeData?.storeName}</h1>
-          <div className="flex items-center justify-center gap-2 text-slate-400 text-sm mb-3">
-            <AtSign className="w-4 h-4" />
-            <span>{storeData?.username}</span>
+    <div className="min-h-screen bg-slate-950 flex flex-col pb-32 relative">
+      <header className="pt-12 pb-8 px-6 text-center relative">
+        <div className="absolute top-0 left-0 right-0 h-64 bg-gradient-to-b from-indigo-600/20 to-transparent pointer-events-none" />
+        <div className="relative">
+          <div className="w-24 h-24 mx-auto mb-4 rounded-3xl bg-white/5 border-4 border-white/10 overflow-hidden">
+            <img
+              src={storeData.store_logo || storeData.photo_url || `https://api.dicebear.com/7.x/initials/svg?seed=${storeData.store_name || slug}`}
+              className="w-full h-full object-cover"
+              alt={storeData.store_name || ''}
+            />
           </div>
-          <div className="inline-flex items-center gap-2 bg-indigo-500/20 border border-indigo-500/30 px-3 py-1 rounded-full text-indigo-300 text-xs font-bold">
-            {modeIcon}
-            {modeLabel}
-          </div>
-        </motion.div>
+          <h1 className="text-3xl font-black text-white mb-2">{storeData.store_name}</h1>
+          <p className="text-slate-400 text-sm font-bold flex items-center justify-center gap-1">
+            <AtSign className="w-3.5 h-3.5" /> {storeData.username}
+          </p>
+        </div>
       </header>
 
-      {/* Description */}
-      {storeData?.storeDescription && (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="mx-6 mb-6"
-        >
-          <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-4">
-            <p className="text-slate-300 text-sm leading-relaxed text-center">{storeData.storeDescription}</p>
-          </div>
-        </motion.div>
+      <div className="px-6 mb-8">
+        <div className="bg-white/5 border border-white/10 rounded-3xl p-6 text-center">
+          <p className="text-slate-300 text-sm leading-relaxed">{welcome}</p>
+        </div>
+      </div>
+
+      {hasAi && (
+        <div className="px-6 mb-6">
+          <button onClick={() => setShowAiChat(true)}
+            className="w-full bg-gradient-to-r from-indigo-500 to-fuchsia-500 text-white font-black py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2">
+            <MessageCircle className="w-5 h-5" /> Conversar com Atendente IA
+          </button>
+        </div>
       )}
 
-      {/* Action Buttons */}
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2 }}
-        className="px-6 mb-6 space-y-3"
-      >
-        {storeData?.storeMode === 'scheduling' && (
-          <button 
-            onClick={() => document.getElementById('services-section')?.scrollIntoView({ behavior: 'smooth' })}
-            className="w-full bg-emerald-500 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-3 shadow-lg active:scale-95 transition-all">
-            <Calendar className="w-5 h-5" /> Ver Serviços ({services.length})
-          </button>
-        )}
-        {(storeData?.storeMode === 'store' || storeData?.storeMode === 'store+ai') && (
-          <button className="w-full bg-indigo-500 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-3 shadow-lg active:scale-95 transition-all"
-            onClick={() => document.getElementById('products-section')?.scrollIntoView({ behavior: 'smooth' })}>
-            <ShoppingBag className="w-5 h-5" /> Ver Produtos ({products.length})
-          </button>
-        )}
-        {storeData?.storeMode === 'store+ai' && (
-          <button 
-            onClick={() => setShowAiChat(true)}
-            className="w-full bg-white/5 backdrop-blur-xl border border-white/10 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-3 active:scale-95 transition-all">
-            <MessageCircle className="w-5 h-5 text-indigo-400" /> Falar com Atendente IA
-          </button>
-        )}
-        <button className="w-full bg-white/5 backdrop-blur-xl border border-white/10 text-white font-bold py-3 rounded-2xl flex items-center justify-center gap-3 text-sm active:scale-95 transition-all">
-          <MessageCircle className="w-4 h-4 text-slate-400" /> Enviar Mensagem
-        </button>
-      </motion.div>
-
-      {/* Services Grid */}
-      {storeData?.storeMode === 'scheduling' && services.length > 0 && (
-        <motion.div id="services-section" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }} className="px-6 mb-8">
-          <h2 className="text-lg font-black text-white mb-4">✂️ Serviços</h2>
+      {hasServices && services.length > 0 && (
+        <div className="px-6 mb-8">
+          <h2 className="text-xs font-black uppercase tracking-widest text-slate-500 mb-4">Serviços</h2>
           <div className="space-y-3">
-            {services.map((service: any) => (
-              <motion.div key={service.id} whileTap={{ scale: 0.97 }}
-                onClick={() => { setSelectedService(service); setShowSchedulingQuiz(true); }}
-                className="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center justify-between cursor-pointer active:scale-95 transition-all">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-xl bg-emerald-500/20 flex items-center justify-center text-emerald-400">
-                    <Calendar className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <p className="text-white font-bold text-sm">{service.name}</p>
-                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{service.duration} min</p>
-                  </div>
+            {services.map(s => (
+              <div key={s.id} className="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center gap-4">
+                <div className="w-12 h-12 bg-emerald-500/20 rounded-xl flex items-center justify-center text-emerald-400 flex-shrink-0">
+                  <Calendar className="w-6 h-6" />
                 </div>
-                <div className="text-right">
-                  <p className="text-emerald-400 font-black text-sm">R$ {service.price.toFixed(2).replace('.', ',')}</p>
-                  <button className="text-[10px] font-black uppercase tracking-widest text-white/40 mt-1">Agendar</button>
+                <div className="flex-1 min-w-0">
+                  <p className="text-white font-bold text-sm truncate">{s.name}</p>
+                  <p className="text-[10px] text-slate-500 font-bold uppercase">{s.duration} min</p>
+                  <p className="text-emerald-400 font-black text-sm">R$ {s.price.toFixed(2).replace('.', ',')}</p>
                 </div>
-              </motion.div>
+                <button
+                  onClick={() => { setSelectedService(s); setShowSchedulingForm(true); }}
+                  className="bg-emerald-500 text-white font-black px-4 py-2 rounded-xl text-[10px] uppercase tracking-widest"
+                >
+                  Agendar
+                </button>
+              </div>
             ))}
           </div>
-        </motion.div>
+        </div>
       )}
 
-      {/* Products Grid */}
-      {products.length > 0 && (
-        <motion.div id="products-section" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }} className="px-6 mb-8">
-          <h2 className="text-lg font-black text-white mb-4">🛍️ Produtos</h2>
+      {hasProducts && products.length > 0 && (
+        <div className="px-6 mb-8">
+          <h2 className="text-xs font-black uppercase tracking-widest text-slate-500 mb-4">Catálogo</h2>
           <div className="grid grid-cols-2 gap-3">
-            {products.map((product: any) => (
-              <motion.div key={product.id} whileTap={{ scale: 0.97 }}
-                onClick={() => setSelectedProduct(product)}
-                className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden cursor-pointer active:scale-95 transition-all">
-                {product.image ? (
-                  <img src={product.image} className="w-full aspect-square object-cover" alt={product.name} />
+            {products.map(p => (
+              <button key={p.id} onClick={() => setSelectedProduct(p)}
+                className="bg-white/5 border border-white/10 rounded-2xl p-3 text-left active:scale-95 transition-transform">
+                {p.image ? (
+                  <img src={p.image} className="w-full aspect-square object-cover rounded-xl mb-3" alt={p.name} />
                 ) : (
-                  <div className="w-full aspect-square bg-white/5 flex items-center justify-center">
-                    <Package className="w-10 h-10 text-slate-600" />
+                  <div className="w-full aspect-square bg-white/5 rounded-xl mb-3 flex items-center justify-center">
+                    <Package className="w-8 h-8 text-slate-600" />
                   </div>
                 )}
-                <div className="p-3">
-                  <p className="text-white font-bold text-xs truncate mb-1">{product.name}</p>
-                  <div className="flex items-center gap-1">
-                    <span className="text-fuchsia-400 font-black text-sm">R$ {product.price?.toFixed(2).replace('.', ',')}</span>
-                    {product.originalPrice && (
-                      <span className="text-slate-600 text-xs line-through">R$ {product.originalPrice?.toFixed(2).replace('.', ',')}</span>
-                    )}
-                  </div>
-                </div>
-              </motion.div>
+                <p className="text-white font-bold text-xs truncate">{p.name}</p>
+                <p className="text-fuchsia-400 font-black text-sm mt-1">R$ {p.price.toFixed(2).replace('.', ',')}</p>
+              </button>
             ))}
           </div>
-        </motion.div>
+        </div>
       )}
 
-      {/* Product Details Modal */}
+      {((hasProducts && products.length === 0) || (hasServices && services.length === 0)) && (
+        <div className="text-center py-16 px-6">
+          <ShoppingBag className="w-16 h-16 text-slate-700 mx-auto mb-4" />
+          <p className="text-slate-400 font-bold">Esta loja ainda não cadastrou {hasServices ? 'serviços' : 'produtos'}.</p>
+        </div>
+      )}
+
+      {/* Modal produto */}
       <AnimatePresence>
         {selectedProduct && (
-          <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-end sm:items-center justify-center p-0 sm:p-6"
-          >
-            <motion.div
-              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
-              className="w-full max-w-lg bg-slate-900 rounded-t-[2.5rem] sm:rounded-[2.5rem] overflow-hidden flex flex-col max-h-[90vh]"
-            >
-              <div className="relative h-72 sm:h-80 w-full">
-                {selectedProduct.image ? (
-                  <img src={selectedProduct.image} className="w-full h-full object-cover" alt={selectedProduct.name} />
-                ) : (
-                  <div className="w-full h-full bg-white/5 flex items-center justify-center">
-                    <Package className="w-20 h-20 text-slate-700" />
-                  </div>
-                )}
-                <button 
-                  onClick={() => setSelectedProduct(null)}
-                  className="absolute top-4 right-4 p-3 bg-black/40 backdrop-blur-xl rounded-2xl text-white active:scale-90 transition-all"
-                >
-                  <X className="w-6 h-6" />
-                </button>
-              </div>
-
-              <div className="p-8 overflow-y-auto no-scrollbar">
-                <div className="flex justify-between items-start mb-2">
-                  <div>
-                    <span className="text-[10px] font-black uppercase tracking-widest text-fuchsia-400 mb-1 block">
-                      {selectedProduct.category}
-                    </span>
-                    <h2 className="text-2xl font-black text-white leading-tight">
-                      {selectedProduct.name}
-                    </h2>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-2xl font-black text-white">
-                      R$ {selectedProduct.price?.toFixed(2).replace('.', ',')}
-                    </p>
-                    {selectedProduct.originalPrice && (
-                      <p className="text-sm text-slate-500 line-through font-bold">
-                        R$ {selectedProduct.originalPrice?.toFixed(2).replace('.', ',')}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="h-px bg-white/5 w-full my-6" />
-
-                <div className="space-y-4 mb-8">
-                  <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">Descrição</h3>
-                  <p className="text-slate-300 text-sm leading-relaxed whitespace-pre-wrap">
-                    {selectedProduct.description || 'Nenhuma descrição fornecida para este produto.'}
-                  </p>
-                </div>
-
-                <button 
-                  onClick={() => handleStartCheckout(selectedProduct)}
-                  className="w-full bg-indigo-500 text-white font-black py-5 rounded-[1.5rem] flex items-center justify-center gap-3 shadow-primary-glow active:scale-95 transition-all">
-                  <ShoppingBag className="w-5 h-5" /> Comprar Agora
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-      {/* Scheduling Quiz Modal */}
-      <AnimatePresence>
-        {showSchedulingQuiz && selectedService && (
-          <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-end sm:items-center justify-center p-0 sm:p-6"
-          >
-            <motion.div
-              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
-              className="w-full max-w-lg bg-slate-900 rounded-t-[2.5rem] sm:rounded-[2.5rem] overflow-hidden flex flex-col max-h-[90vh]"
-            >
-              <div className="p-8">
-                <div className="flex justify-between items-center mb-8">
-                  <div>
-                    <h2 className="text-2xl font-black text-white leading-tight">Agendar Horário</h2>
-                    <p className="text-emerald-400 font-bold text-sm">{selectedService.name}</p>
-                  </div>
-                  <button onClick={() => setShowSchedulingQuiz(false)} className="p-3 bg-white/5 rounded-2xl text-slate-400 active:scale-90">
-                    <X className="w-6 h-6" />
-                  </button>
-                </div>
-
-                <div className="space-y-5">
-                  {schedulingStatus === 'success' ? (
-                    <motion.div 
-                      initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
-                      className="text-center py-12"
-                    >
-                      <div className="w-20 h-20 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
-                        <CheckCircle className="w-10 h-10 text-emerald-400" />
-                      </div>
-                      <h3 className="text-xl font-black text-white mb-2">Agendamento Realizado!</h3>
-                      <p className="text-slate-400 text-sm">O lojista entrará em contato em breve para confirmar seu horário.</p>
-                    </motion.div>
-                  ) : (
-                    <>
-                      <div>
-                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Seu Nome</label>
-                        <input
-                          value={schedulingData.name}
-                          onChange={(e) => setSchedulingData({ ...schedulingData, name: e.target.value })}
-                          placeholder="Como podemos te chamar?"
-                          className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-white font-medium focus:outline-none focus:border-emerald-500/50"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Telefone / WhatsApp</label>
-                        <input
-                          value={schedulingData.phone}
-                          onChange={(e) => setSchedulingData({ ...schedulingData, phone: e.target.value })}
-                          placeholder="(00) 00000-0000"
-                          className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-white font-medium focus:outline-none focus:border-emerald-500/50"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Horário Preferencial</label>
-                        <input
-                          type="datetime-local"
-                          value={schedulingData.time}
-                          onChange={(e) => setSchedulingData({ ...schedulingData, time: e.target.value })}
-                          className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-white font-medium focus:outline-none focus:border-emerald-500/50"
-                        />
-                      </div>
-
-                      <button 
-                        onClick={handleConfirmScheduling}
-                        disabled={schedulingStatus === 'saving' || !schedulingData.name || !schedulingData.phone || !schedulingData.time}
-                        className="w-full bg-emerald-500 text-white font-black py-5 rounded-[1.5rem] flex items-center justify-center gap-3 shadow-primary-glow active:scale-95 transition-all disabled:opacity-50 mt-4"
-                      >
-                        {schedulingStatus === 'saving' ? <Loader className="w-5 h-5 animate-spin" /> : 'Confirmar Agendamento'}
-                      </button>
-                    </>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={() => setSelectedProduct(null)}
+            className="fixed inset-0 bg-black/70 backdrop-blur-md z-[200] flex items-end">
+            <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} onClick={e => e.stopPropagation()}
+              className="w-full bg-slate-900 rounded-t-3xl max-h-[85vh] overflow-y-auto">
+              <button onClick={() => setSelectedProduct(null)} className="absolute top-4 right-4 z-10 p-2 bg-black/40 backdrop-blur-md rounded-xl text-white">
+                <X className="w-5 h-5" />
+              </button>
+              {selectedProduct.image && <img src={selectedProduct.image} className="w-full aspect-square object-cover" alt={selectedProduct.name} />}
+              <div className="p-6 space-y-4">
+                <h2 className="text-2xl font-black text-white">{selectedProduct.name}</h2>
+                {selectedProduct.description && <p className="text-slate-300 text-sm">{selectedProduct.description}</p>}
+                <div className="flex items-baseline gap-3">
+                  <p className="text-3xl font-black text-fuchsia-400">R$ {selectedProduct.price.toFixed(2).replace('.', ',')}</p>
+                  {selectedProduct.original_price && (
+                    <p className="text-slate-600 text-sm line-through">R$ {selectedProduct.original_price.toFixed(2).replace('.', ',')}</p>
                   )}
                 </div>
+                <button className="w-full bg-fuchsia-500 text-white font-black py-4 rounded-2xl uppercase tracking-widest text-sm">
+                  Comprar via WhatsApp
+                </button>
               </div>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* AI Chat Modal */}
+      {/* Modal agendamento */}
       <AnimatePresence>
-        {showAiChat && (
-          <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/80 backdrop-blur-md z-[110] flex items-end sm:items-center justify-center p-0 sm:p-6"
-          >
-            <motion.div
-              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
-              className="w-full max-w-lg h-full sm:h-[600px] bg-slate-900 rounded-t-[2.5rem] sm:rounded-[2.5rem] overflow-hidden flex flex-col shadow-2xl"
-            >
-              {/* AI Chat Header */}
-              <div className="p-6 border-b border-white/5 flex items-center justify-between bg-slate-900/50 backdrop-blur-xl">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-indigo-500/20 flex items-center justify-center text-indigo-400">
-                    <MessageCircle className="w-6 h-6" />
-                  </div>
+        {showSchedulingForm && selectedService && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/70 backdrop-blur-md z-[200] flex items-end">
+            <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+              className="w-full bg-slate-900 rounded-t-3xl max-h-[90vh] overflow-y-auto">
+              <div className="p-6 space-y-5">
+                <div className="flex justify-between items-start">
                   <div>
-                    <h2 className="text-white font-black text-sm">Atendente IA</h2>
-                    <p className="text-[10px] text-emerald-400 font-bold uppercase tracking-widest">Online agora</p>
+                    <h2 className="text-2xl font-black text-white">Agendar</h2>
+                    <p className="text-emerald-400 text-sm font-bold">{selectedService.name}</p>
                   </div>
-                </div>
-                <button onClick={() => setShowAiChat(false)} className="p-2 text-slate-400 active:scale-90 transition-all">
-                  <X className="w-6 h-6" />
-                </button>
-              </div>
-
-              {/* Chat Messages */}
-              <div className="flex-1 overflow-y-auto p-6 space-y-4 no-scrollbar">
-                {aiMessages.map((msg) => (
-                  <div key={msg.id} className={`flex ${msg.role === 'ai' ? 'justify-start' : 'justify-end'}`}>
-                    <div className={`max-w-[85%] p-4 rounded-[1.5rem] text-sm font-medium ${
-                      msg.role === 'ai' 
-                        ? 'bg-white/5 text-slate-200 border border-white/5 rounded-tl-none' 
-                        : 'bg-indigo-500 text-white shadow-primary-glow rounded-tr-none'
-                    }`}>
-                      {msg.text}
-                    </div>
-                  </div>
-                ))}
-                {isAiTyping && (
-                  <div className="flex justify-start">
-                    <div className="bg-white/5 p-4 rounded-[1.5rem] rounded-tl-none border border-white/5">
-                      <div className="flex gap-1">
-                        <motion.div animate={{ opacity: [0.2, 1, 0.2] }} transition={{ repeat: Infinity, duration: 1 }} className="w-1.5 h-1.5 bg-indigo-400 rounded-full" />
-                        <motion.div animate={{ opacity: [0.2, 1, 0.2] }} transition={{ repeat: Infinity, duration: 1, delay: 0.2 }} className="w-1.5 h-1.5 bg-indigo-400 rounded-full" />
-                        <motion.div animate={{ opacity: [0.2, 1, 0.2] }} transition={{ repeat: Infinity, duration: 1, delay: 0.4 }} className="w-1.5 h-1.5 bg-indigo-400 rounded-full" />
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Chat Input */}
-              <div className="p-6 bg-slate-900 border-t border-white/5">
-                <div className="relative">
-                  <input
-                    value={aiInput}
-                    onChange={(e) => setAiInput(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleSendAiMessage()}
-                    placeholder="Digite sua dúvida..."
-                    className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-4 pr-14 text-white text-sm font-medium focus:outline-none focus:border-indigo-500/50"
-                  />
-                  <button 
-                    onClick={handleSendAiMessage}
-                    disabled={!aiInput.trim() || isAiTyping}
-                    className="absolute right-2 top-2 w-10 h-10 bg-indigo-500 rounded-xl flex items-center justify-center text-white shadow-lg active:scale-90 transition-all disabled:opacity-50"
-                  >
-                    <Send className="w-5 h-5" />
+                  <button onClick={() => { setShowSchedulingForm(false); setSelectedService(null); }} className="p-2 bg-white/5 rounded-xl text-slate-400">
+                    <X className="w-5 h-5" />
                   </button>
                 </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
-      {/* Checkout / Pix Modal */}
-      <AnimatePresence>
-        {showCheckout && (
-          <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/90 backdrop-blur-md z-[150] flex items-end sm:items-center justify-center p-0 sm:p-6"
-          >
-            <motion.div
-              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
-              className="w-full max-w-sm bg-slate-900 rounded-t-[2.5rem] sm:rounded-[2.5rem] overflow-hidden flex flex-col p-8"
-            >
-              <div className="flex justify-between items-center mb-8">
-                <h3 className="text-xl font-black text-white">Pagamento Pix</h3>
-                <button onClick={() => { setShowCheckout(false); setPixData(null); }} className="p-2 text-slate-400">
-                  <X className="w-6 h-6" />
-                </button>
-              </div>
-
-              {checkoutLoading ? (
-                <div className="py-12 flex flex-col items-center gap-4">
-                  <Loader className="w-10 h-10 text-indigo-500 animate-spin" />
-                  <p className="text-slate-500 font-bold text-sm">Gerando seu Pix...</p>
-                </div>
-              ) : pixData ? (
-                <div className="space-y-6 text-center">
-                  <div className="bg-white p-4 rounded-3xl inline-block mx-auto">
-                    <img src={pixData.qrCode} className="w-48 h-48" alt="Pix QR Code" />
+                {schedulingStatus === 'success' ? (
+                  <div className="text-center py-12">
+                    <CheckCircle className="w-16 h-16 text-emerald-400 mx-auto mb-4" />
+                    <h3 className="text-xl font-black text-white">Solicitação enviada!</h3>
+                    <p className="text-slate-400 text-sm mt-2">A loja vai confirmar pelo WhatsApp.</p>
                   </div>
-                  
-                  <div>
-                    <p className="text-slate-500 font-black text-[10px] uppercase tracking-widest mb-1">Valor a Pagar</p>
-                    <p className="text-3xl font-black text-white">R$ {pixData.amount?.toFixed(2).replace('.', ',')}</p>
-                  </div>
+                ) : (
+                  <>
+                    <div>
+                      <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Seu nome</label>
+                      <div className="bg-white/5 border border-white/10 rounded-xl p-3 flex items-center gap-3">
+                        <User className="w-4 h-4 text-slate-500" />
+                        <input value={schedulingData.name} onChange={e => setSchedulingData(d => ({ ...d, name: e.target.value }))}
+                          placeholder="Nome completo" className="bg-transparent text-white outline-none w-full" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">WhatsApp</label>
+                      <input value={schedulingData.phone} onChange={e => setSchedulingData(d => ({ ...d, phone: e.target.value }))}
+                        placeholder="(11) 99999-9999"
+                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Data e hora</label>
+                      <input type="datetime-local" value={schedulingData.time} onChange={e => setSchedulingData(d => ({ ...d, time: e.target.value }))}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white" />
+                    </div>
 
-                  <div className="space-y-3">
-                    <button 
-                      onClick={() => {
-                        navigator.clipboard.writeText(pixData.pixCode);
-                        soundManager.playChime();
-                      }}
-                      className="w-full bg-white/5 border border-white/10 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-3 active:scale-95 transition-all text-sm"
-                    >
-                      <Copy className="w-4 h-4 text-indigo-400" /> Copiar Código Pix
+                    <button onClick={handleScheduleService}
+                      disabled={schedulingStatus === 'saving' || !schedulingData.name || !schedulingData.phone || !schedulingData.time}
+                      className="w-full bg-emerald-500 text-white font-black py-4 rounded-2xl uppercase tracking-widest text-sm disabled:opacity-50 flex items-center justify-center gap-2">
+                      {schedulingStatus === 'saving' ? <Loader className="w-5 h-5 animate-spin" /> : 'Solicitar Agendamento'}
                     </button>
-                    <p className="text-[10px] text-slate-500 font-medium">
-                      O pagamento é processado instantaneamente. Após pagar, você receberá a confirmação aqui.
-                    </p>
-                  </div>
-
-                  <div className="pt-4 flex items-center justify-center gap-2 text-emerald-400 font-bold text-xs">
-                    <Check className="w-4 h-4" /> Aguardando pagamento...
-                  </div>
-                </div>
-              ) : null}
+                  </>
+                )}
+              </div>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Footer Arroba Branding */}
-      <div className="text-center pb-8 mt-4">
-        <a href="https://arroba.live" className="inline-flex items-center gap-1.5 text-slate-600 text-xs font-bold hover:text-slate-400 transition-colors">
-          <AtSign className="w-3.5 h-3.5" /> Criado com Arroba
-        </a>
-      </div>
+      {/* Chat IA */}
+      <AnimatePresence>
+        {showAiChat && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950 z-[200] flex flex-col">
+            <header className="h-16 flex items-center justify-between px-6 border-b border-white/5">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-indigo-500 rounded-2xl flex items-center justify-center">
+                  <MessageCircle className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <p className="text-sm font-black text-white">Atendente IA</p>
+                  <p className="text-[10px] text-emerald-400 font-bold">Online</p>
+                </div>
+              </div>
+              <button onClick={() => setShowAiChat(false)} className="p-2 text-slate-400"><X className="w-5 h-5" /></button>
+            </header>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {aiMessages.map(msg => (
+                <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[80%] rounded-2xl p-3 ${msg.role === 'user' ? 'bg-indigo-500 text-white' : 'bg-white/5 text-slate-200 border border-white/10'}`}>
+                    <p className="text-sm">{msg.text}</p>
+                  </div>
+                </div>
+              ))}
+              {isAiTyping && (
+                <div className="flex justify-start">
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-3">
+                    <Loader className="w-4 h-4 animate-spin text-slate-400" />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 border-t border-white/5 flex gap-2">
+              <input value={aiInput} onChange={e => setAiInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleSendAi()}
+                placeholder="Digite sua pergunta..."
+                className="flex-1 bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white outline-none" />
+              <button onClick={handleSendAi} disabled={!aiInput.trim() || isAiTyping}
+                className="w-12 h-12 bg-indigo-500 text-white rounded-2xl flex items-center justify-center disabled:opacity-50">
+                <Send className="w-5 h-5" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

@@ -1,6 +1,6 @@
-import { auth } from './firebase';
-
-// Shared error handler for Firestore operations
+/**
+ * Logger genérico de erros (substitui o handler antigo do Firestore).
+ */
 export enum OperationType {
   CREATE = 'create',
   UPDATE = 'update',
@@ -10,41 +10,11 @@ export enum OperationType {
   WRITE = 'write',
 }
 
-export interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId?: string | null;
-    email?: string | null;
-    emailVerified?: boolean | null;
-    isAnonymous?: boolean | null;
-    tenantId?: string | null;
-    providerInfo?: {
-      providerId?: string | null;
-      email?: string | null;
-    }[];
-  }
+export function handleDatabaseError(error: unknown, op: OperationType, path: string | null) {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`[db] ${op} failed at ${path}:`, message);
+  throw error;
 }
 
-export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData?.map(provider => ({
-        providerId: provider.providerId,
-        email: provider.email,
-      })) || []
-    },
-    operationType,
-    path
-  }
-  const errorMessage = JSON.stringify(errInfo);
-  console.error('Firestore Error: ', errorMessage);
-  throw new Error(errorMessage);
-}
+// Aliases legados para compatibilidade
+export const handleFirestoreError = handleDatabaseError;

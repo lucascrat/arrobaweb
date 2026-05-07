@@ -1,8 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowLeft, Plus, Trash2, Edit3, Package, DollarSign, Tag, Image, Loader, CheckCircle, X, Store, Eye, Link, Copy, ToggleLeft, ToggleRight, Calendar, MessageCircle, ShoppingBag, Layout, ExternalLink, AlertCircle } from 'lucide-react';
-import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, query, orderBy, getDoc, setDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import {
+  ArrowLeft, Plus, Trash2, Edit3, Package, Image, Loader, CheckCircle, X, Store, Eye, Copy,
+  ToggleLeft, ToggleRight, Calendar, MessageCircle, ShoppingBag, Layout, ExternalLink, AlertCircle, DollarSign,
+} from 'lucide-react';
+import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/AuthContext';
 import { uploadToR2 } from '../lib/r2';
 import { Screen } from '../types';
@@ -17,92 +19,123 @@ interface Product {
   id: string;
   name: string;
   price: number;
-  originalPrice?: number;
+  original_price: number | null;
   description: string;
   image: string;
   category: string;
-  stock?: number;
+  stock: number | null;
   active: boolean;
+}
+
+interface Service {
+  id: string;
+  name: string;
+  price: number;
+  duration: number;
+  description: string;
+  active: boolean;
+}
+
+interface Appointment {
+  id: string;
+  service_name: string;
+  customer_name: string;
+  customer_phone: string;
+  appointment_time: string;
+  status: 'pending' | 'confirmed' | 'rejected' | 'completed';
 }
 
 const CATEGORIES = ['Geral', 'Roupas', 'Calçados', 'Acessórios', 'Beleza', 'Alimentos', 'Eletrônicos', 'Serviços'];
 
 export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScreen }) => {
-  const { user, profile } = useAuth();
+  const { user, profile, refreshProfile } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
-  const [services, setServices] = useState<any[]>([]);
-  const [appointments, setAppointments] = useState<any[]>([]);
+  const [services, setServices] = useState<Service[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [availableTemplates, setAvailableTemplates] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [tab, setTab] = useState<'products' | 'services' | 'appointments' | 'payments' | 'settings'>('products');
   const [showForm, setShowForm] = useState(false);
   const [showServiceForm, setShowServiceForm] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
-  const [editingService, setEditingService] = useState<any | null>(null);
+  const [editingService, setEditingService] = useState<Service | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploadingImg, setUploadingImg] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
-  const [tab, setTab] = useState<'products' | 'services' | 'appointments' | 'payments' | 'settings'>('products');
-  const [accessCodeEnabled, setAccessCodeEnabled] = useState(profile?.accessCodeEnabled || false);
-  const [accessCode, setAccessCode] = useState(profile?.accessCode || '');
-  const [storeMode, setStoreMode] = useState<'store' | 'store+ai' | 'scheduling'>(profile?.storeMode || 'store');
-  const [storeDescription, setStoreDescription] = useState(profile?.storeDescription || '');
-  const [professionalSlug, setProfessionalSlug] = useState(profile?.professionalSlug || '');
+
+  const [accessCodeEnabled, setAccessCodeEnabled] = useState<boolean>(profile?.access_code_enabled || false);
+  const [accessCode, setAccessCode] = useState<string>(profile?.access_code || '');
+  const [storeMode, setStoreMode] = useState<'store' | 'store+ai' | 'scheduling'>(profile?.store_mode || 'store');
+  const [storeDescription, setStoreDescription] = useState<string>(profile?.store_description || '');
+  const [professionalSlug, setProfessionalSlug] = useState<string>(profile?.professional_slug || '');
   const [efiConfig, setEfiConfig] = useState({
-    clientId: profile?.efiConfig?.clientId || '',
-    clientSecret: profile?.efiConfig?.clientSecret || '',
-    key: profile?.efiConfig?.key || '',
-    active: profile?.efiConfig?.active || false
+    clientId: profile?.efi_config?.clientId || '',
+    clientSecret: profile?.efi_config?.clientSecret || '',
+    key: profile?.efi_config?.key || '',
+    active: profile?.efi_config?.active || false,
   });
   const [savingSettings, setSavingSettings] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
-  const [availableTemplates, setAvailableTemplates] = useState<any[]>([]);
   const [slugStatus, setSlugStatus] = useState<{ state: 'idle' | 'checking' | 'ok' | 'error'; message?: string }>({ state: 'idle' });
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Form state
   const [form, setForm] = useState({
     name: '', price: '', originalPrice: '', description: '',
-    image: '', category: 'Geral', stock: '', active: true
+    image: '', category: 'Geral', stock: '', active: true,
   });
 
   const [serviceForm, setServiceForm] = useState({
-    name: '', price: '', duration: '30', description: '', active: true
+    name: '', price: '', duration: '30', description: '', active: true,
   });
+
+  // Atualiza os campos quando o profile carrega
+  useEffect(() => {
+    if (profile) {
+      setAccessCodeEnabled(profile.access_code_enabled || false);
+      setAccessCode(profile.access_code || '');
+      setStoreMode(profile.store_mode || 'store');
+      setStoreDescription(profile.store_description || '');
+      setProfessionalSlug(profile.professional_slug || '');
+      setEfiConfig({
+        clientId: profile.efi_config?.clientId || '',
+        clientSecret: profile.efi_config?.clientSecret || '',
+        key: profile.efi_config?.key || '',
+        active: profile.efi_config?.active || false,
+      });
+    }
+  }, [profile?.id]);
 
   useEffect(() => {
     if (!user) return;
-    const q = query(
-      collection(db, 'stores', user.uid, 'products'),
-      orderBy('createdAt', 'desc')
-    );
-    const unsub = onSnapshot(q, snap => {
-      setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() } as Product)));
-    });
 
-    const sq = query(
-      collection(db, 'stores', user.uid, 'services'),
-      orderBy('createdAt', 'desc')
-    );
-    const sunsub = onSnapshot(sq, snap => {
-      setServices(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
-
-    const aq = query(
-      collection(db, 'stores', user.uid, 'appointments'),
-      orderBy('createdAt', 'desc')
-    );
-    const aunsub = onSnapshot(aq, snap => {
-      setAppointments(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    const loadAll = async () => {
+      const [p, s, a, t] = await Promise.all([
+        supabase.from('products').select('*').eq('owner_id', user.id).order('created_at', { ascending: false }),
+        supabase.from('services').select('*').eq('owner_id', user.id).order('created_at', { ascending: false }),
+        supabase.from('appointments').select('*').eq('owner_id', user.id).order('created_at', { ascending: false }),
+        supabase.from('store_templates').select('*').order('name', { ascending: true }),
+      ]);
+      setProducts((p.data as Product[]) || []);
+      setServices((s.data as Service[]) || []);
+      setAppointments((a.data as Appointment[]) || []);
+      setAvailableTemplates(t.data || []);
       setLoading(false);
-    });
+    };
 
-    // 4. Fetch Templates
-    const tq = query(collection(db, 'storeTemplates'), orderBy('name', 'asc'));
-    const tunsub = onSnapshot(tq, snap => {
-      setAvailableTemplates(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
+    loadAll();
 
-    return () => { unsub(); sunsub(); aunsub(); tunsub(); };
-  }, [user]);
+    // Realtime
+    const ch = supabase.channel(`store:${user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'arroba', table: 'products', filter: `owner_id=eq.${user.id}` }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'arroba', table: 'services', filter: `owner_id=eq.${user.id}` }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'arroba', table: 'appointments', filter: `owner_id=eq.${user.id}` }, loadAll)
+      .subscribe();
+
+    return () => { supabase.removeChannel(ch); };
+  }, [user?.id]);
 
   useEffect(() => {
     if (!loading && products.length === 0 && services.length === 0) {
@@ -110,96 +143,86 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
     }
   }, [loading, products.length, services.length]);
 
-  // Debounced slug validation enquanto o lojista digita
+  // Slug validation com debounce
   useEffect(() => {
     if (!user) return;
     const slug = normalizeSlug(professionalSlug);
-    if (!slug) {
-      setSlugStatus({ state: 'idle' });
-      return;
-    }
-    if (slug === (profile?.professionalSlug || '')) {
+    if (!slug) { setSlugStatus({ state: 'idle' }); return; }
+    if (slug === (profile?.professional_slug || '')) {
       setSlugStatus({ state: 'ok', message: 'Link atual.' });
       return;
     }
     setSlugStatus({ state: 'checking' });
     const t = setTimeout(async () => {
-      const result = await validateSlug(slug, user.uid);
-      if (result.ok) {
-        setSlugStatus({ state: 'ok', message: 'Disponível!' });
-      } else {
-        setSlugStatus({ state: 'error', message: result.message });
-      }
+      const res = await validateSlug(slug, user.id);
+      setSlugStatus({ state: res.ok ? 'ok' : 'error', message: res.message });
     }, 500);
     return () => clearTimeout(t);
-  }, [professionalSlug, user, profile?.professionalSlug]);
+  }, [professionalSlug, user?.id, profile?.professional_slug]);
 
   const handleApplyTemplate = async (template: any) => {
     if (!user) return;
     setSaving(true);
     try {
-      // 1. Garante que existe um slug; se ausente, gera a partir do storeName ou username
-      let nextSlug = profile?.professionalSlug;
+      let nextSlug = profile?.professional_slug || null;
       if (!nextSlug) {
-        const candidate = normalizeSlug(profile?.storeName || profile?.username || `loja-${user.uid.slice(0, 6)}`);
-        const check = await validateSlug(candidate, user.uid);
-        nextSlug = check.ok ? check.slug : `${candidate}-${user.uid.slice(0, 4)}`;
+        const candidate = normalizeSlug(profile?.store_name || profile?.username || `loja-${user.id.slice(0, 6)}`);
+        const c = await validateSlug(candidate, user.id);
+        nextSlug = c.ok ? c.slug : `${candidate || 'loja'}-${user.id.slice(0, 4)}`;
       }
 
-      // 2. Atualiza perfil com modo, descrição, prompt e tema
-      await updateDoc(doc(db, 'users', user.uid), {
-        storeMode: template.config.storeMode,
-        storeDescription: template.description,
-        templateId: template.id,
-        themeColor: template.themeColor || 'indigo',
-        professionalSlug: nextSlug,
-        onboardingCompleted: true,
-        'config.welcomeMessage': template.config.welcomeMessage || '',
-        'config.aiPrompt': template.config.aiPrompt || '',
-        updatedAt: serverTimestamp(),
-      });
+      await supabase.from('profiles').update({
+        store_mode: template.config.storeMode,
+        store_description: template.description,
+        template_id: template.id,
+        theme_color: template.theme_color || 'indigo',
+        professional_slug: nextSlug,
+        config: {
+          welcomeMessage: template.config.welcomeMessage || '',
+          aiPrompt: template.config.aiPrompt || '',
+        },
+        onboarding_completed: true,
+      }).eq('id', user.id);
+
       setStoreMode(template.config.storeMode);
       setStoreDescription(template.description);
       setProfessionalSlug(nextSlug || '');
 
-      // 3. Popula produtos/serviços de exemplo do template (se houver)
-      const samplesP = (template.sampleProducts || []) as any[];
-      const samplesS = (template.sampleServices || []) as any[];
+      const samplesP = (template.sample_products || []) as any[];
+      const samplesS = (template.sample_services || []) as any[];
 
       if (samplesP.length === 0 && samplesS.length === 0) {
-        // Fallback: cria 1 item demonstrativo conforme o modo
         if (template.config.storeMode === 'scheduling') {
-          await addDoc(collection(db, 'stores', user.uid, 'services'), {
-            name: 'Serviço Demonstrativo', price: 50, duration: 30,
-            description: 'Edite ou exclua este serviço de exemplo.',
-            active: true, createdAt: serverTimestamp(),
+          await supabase.from('services').insert({
+            owner_id: user.id, name: 'Serviço Demonstrativo', price: 50, duration: 30,
+            description: 'Edite ou exclua este serviço.', active: true,
           });
         } else {
-          await addDoc(collection(db, 'stores', user.uid, 'products'), {
-            name: 'Produto Exemplo', price: 99.9, category: 'Geral',
-            description: 'Edite ou exclua este produto de exemplo.',
+          await supabase.from('products').insert({
+            owner_id: user.id, name: 'Produto Exemplo', price: 99.9, category: 'Geral',
+            description: 'Edite ou exclua este produto.',
             image: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=500',
-            active: true, createdAt: serverTimestamp(),
+            active: true,
           });
         }
       } else {
-        for (const p of samplesP) {
-          await addDoc(collection(db, 'stores', user.uid, 'products'), {
-            name: p.name, price: Number(p.price) || 0,
+        if (samplesP.length) {
+          await supabase.from('products').insert(samplesP.map(p => ({
+            owner_id: user.id, name: p.name, price: Number(p.price) || 0,
             description: p.description || '', image: p.image || '',
             category: p.category || 'Geral', active: true,
-            createdAt: serverTimestamp(),
-          });
+          })));
         }
-        for (const s of samplesS) {
-          await addDoc(collection(db, 'stores', user.uid, 'services'), {
-            name: s.name, price: Number(s.price) || 0,
+        if (samplesS.length) {
+          await supabase.from('services').insert(samplesS.map(s => ({
+            owner_id: user.id, name: s.name, price: Number(s.price) || 0,
             duration: Number(s.duration) || 30, description: s.description || '',
-            active: true, createdAt: serverTimestamp(),
-          });
+            active: true,
+          })));
         }
       }
 
+      await refreshProfile();
       setShowWizard(false);
       soundManager.playChime();
       setSuccessMsg('Modelo aplicado com sucesso!');
@@ -242,12 +265,12 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
     setForm({
       name: product.name,
       price: String(product.price),
-      originalPrice: String(product.originalPrice || ''),
-      description: product.description,
-      image: product.image,
+      originalPrice: String(product.original_price || ''),
+      description: product.description || '',
+      image: product.image || '',
       category: product.category,
       stock: String(product.stock || ''),
-      active: product.active
+      active: product.active,
     });
     setShowForm(true);
     soundManager.playClick();
@@ -257,26 +280,23 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
     if (!user || !form.name.trim() || !form.price) return;
     setSaving(true);
     try {
-      const data = {
+      const data: any = {
+        owner_id: user.id,
         name: form.name.trim(),
         price: parseFloat(form.price),
-        originalPrice: form.originalPrice ? parseFloat(form.originalPrice) : null,
+        original_price: form.originalPrice ? parseFloat(form.originalPrice) : null,
         description: form.description.trim(),
         image: form.image,
         category: form.category,
         stock: form.stock ? parseInt(form.stock) : null,
         active: form.active,
-        updatedAt: serverTimestamp()
       };
-
       if (editingProduct) {
-        await updateDoc(doc(db, 'stores', user.uid, 'products', editingProduct.id), data);
+        delete data.owner_id;
+        await supabase.from('products').update(data).eq('id', editingProduct.id);
       } else {
-        await addDoc(collection(db, 'stores', user.uid, 'products'), {
-          ...data, createdAt: serverTimestamp()
-        });
+        await supabase.from('products').insert(data);
       }
-
       setShowForm(false);
       setSuccessMsg(editingProduct ? 'Produto atualizado!' : 'Produto cadastrado!');
       soundManager.playSent();
@@ -292,23 +312,20 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
     if (!user || !serviceForm.name.trim() || !serviceForm.price) return;
     setSaving(true);
     try {
-      const data = {
+      const data: any = {
+        owner_id: user.id,
         name: serviceForm.name.trim(),
         price: parseFloat(serviceForm.price),
         duration: parseInt(serviceForm.duration),
         description: serviceForm.description.trim(),
         active: serviceForm.active,
-        updatedAt: serverTimestamp()
       };
-
       if (editingService) {
-        await updateDoc(doc(db, 'stores', user.uid, 'services', editingService.id), data);
+        delete data.owner_id;
+        await supabase.from('services').update(data).eq('id', editingService.id);
       } else {
-        await addDoc(collection(db, 'stores', user.uid, 'services'), {
-          ...data, createdAt: serverTimestamp()
-        });
+        await supabase.from('services').insert(data);
       }
-
       setShowServiceForm(false);
       setSuccessMsg(editingService ? 'Serviço atualizado!' : 'Serviço cadastrado!');
       soundManager.playSent();
@@ -321,20 +338,17 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
   };
 
   const handleDelete = async (productId: string) => {
-    if (!user) return;
-    await deleteDoc(doc(db, 'stores', user.uid, 'products', productId));
+    await supabase.from('products').delete().eq('id', productId);
     soundManager.playClick();
   };
 
   const handleDeleteService = async (serviceId: string) => {
-    if (!user) return;
-    await deleteDoc(doc(db, 'stores', user.uid, 'services', serviceId));
+    await supabase.from('services').delete().eq('id', serviceId);
     soundManager.playClick();
   };
 
-  const handleUpdateAppointmentStatus = async (appId: string, status: string) => {
-    if (!user) return;
-    await updateDoc(doc(db, 'stores', user.uid, 'appointments', appId), { status });
+  const handleUpdateAppointmentStatus = async (appId: string, status: 'pending' | 'confirmed' | 'rejected' | 'completed') => {
+    await supabase.from('appointments').update({ status }).eq('id', appId);
     soundManager.playSent();
   };
 
@@ -342,11 +356,10 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
     if (!user) return;
     setSavingSettings(true);
     try {
-      // Valida slug antes de salvar
       const desiredSlug = normalizeSlug(professionalSlug);
-      let finalSlug = profile?.professionalSlug || '';
-      if (desiredSlug && desiredSlug !== profile?.professionalSlug) {
-        const check = await validateSlug(desiredSlug, user.uid);
+      let finalSlug = profile?.professional_slug || '';
+      if (desiredSlug && desiredSlug !== profile?.professional_slug) {
+        const check = await validateSlug(desiredSlug, user.id);
         if (!check.ok) {
           setSuccessMsg(check.message);
           setSlugStatus({ state: 'error', message: check.message });
@@ -360,30 +373,31 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
         finalSlug = desiredSlug;
       }
 
-      await updateDoc(doc(db, 'users', user.uid), {
-        accessCodeEnabled,
-        accessCode: accessCode.trim().toUpperCase(),
-        storeMode,
-        storeDescription,
-        efiConfig,
-        professionalSlug: finalSlug,
-        updatedAt: serverTimestamp(),
-      });
+      await supabase.from('profiles').update({
+        access_code_enabled: accessCodeEnabled,
+        access_code: accessCode.trim().toUpperCase(),
+        store_mode: storeMode,
+        store_description: storeDescription,
+        efi_config: efiConfig,
+        professional_slug: finalSlug,
+      }).eq('id', user.id);
+
       setProfessionalSlug(finalSlug);
+      await refreshProfile();
       setSuccessMsg('Configurações salvas!');
       soundManager.playSent();
       setTimeout(() => setSuccessMsg(''), 3000);
     } catch (err) {
       console.error(err);
       soundManager.playAlert();
-      setSuccessMsg('Erro ao salvar configurações.');
+      setSuccessMsg('Erro ao salvar.');
       setTimeout(() => setSuccessMsg(''), 3000);
     } finally {
       setSavingSettings(false);
     }
   };
 
-  const activeSlug = profile?.professionalSlug || '';
+  const activeSlug = profile?.professional_slug || '';
   const storeLink = activeSlug ? `https://${activeSlug}.arroba.live` : '';
   const handleCopyLink = () => {
     if (!storeLink) {
@@ -398,7 +412,7 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
   };
   const handleOpenStore = () => {
     if (!storeLink) {
-      setSuccessMsg('Defina um link primeiro nas configurações.');
+      setSuccessMsg('Defina um link primeiro.');
       setTab('settings');
       setTimeout(() => setSuccessMsg(''), 2500);
       return;
@@ -408,7 +422,7 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col pb-32">
-      {/* Wizard Overlay */}
+      {/* Wizard */}
       <AnimatePresence>
         {showWizard && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-slate-950 z-[100] flex flex-col p-6 overflow-y-auto">
@@ -437,11 +451,8 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
                   <p className="text-slate-500 text-xs line-clamp-2">{tmpl.description}</p>
                 </button>
               ))}
-              
-              <button 
-                onClick={() => setShowWizard(false)}
-                className="mt-4 text-slate-500 font-bold text-sm underline py-4"
-              >
+
+              <button onClick={() => setShowWizard(false)} className="mt-4 text-slate-500 font-bold text-sm underline py-4">
                 Configurar manualmente
               </button>
             </div>
@@ -450,7 +461,6 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
       </AnimatePresence>
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
 
-      {/* Success Toast */}
       <AnimatePresence>
         {successMsg && (
           <motion.div
@@ -463,49 +473,44 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
         )}
       </AnimatePresence>
 
-      {/* Header */}
       <header className="fixed top-0 left-0 right-0 h-16 bg-slate-900/40 backdrop-blur-2xl border-b border-white/5 flex items-center px-4 justify-between z-50">
         <div className="flex items-center gap-3">
-          <button onClick={() => setScreen('chat-list')} className="p-2 text-slate-400 active:scale-90 transition-transform">
+          <button onClick={() => setScreen('chat-list')} className="p-2 text-slate-400 active:scale-90">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div>
             <h1 className="text-sm font-black text-white">Gerenciar Loja</h1>
-            <p className="text-[10px] text-fuchsia-400 font-bold">{profile?.storeName}</p>
+            <p className="text-[10px] text-fuchsia-400 font-bold">{profile?.store_name || ''}</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setScreen('public-store')}
-            className="flex items-center gap-1 px-3 py-1.5 bg-fuchsia-500/20 border border-fuchsia-500/30 rounded-full text-fuchsia-300 text-xs font-bold transition-all hover:bg-fuchsia-500/30">
-            <Eye className="w-3.5 h-3.5" /> Ver Loja
-          </button>
-        </div>
+        <button onClick={handleOpenStore} className="flex items-center gap-1 px-3 py-1.5 bg-fuchsia-500/20 border border-fuchsia-500/30 rounded-full text-fuchsia-300 text-xs font-bold hover:bg-fuchsia-500/30">
+          <Eye className="w-3.5 h-3.5" /> Ver Loja
+        </button>
       </header>
 
-      {/* Tabs */}
       <div className="fixed top-16 left-0 right-0 z-40 bg-slate-950 border-b border-white/5 flex">
         <button onClick={() => setTab('products')}
-          className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest transition-all ${tab === 'products' ? 'text-fuchsia-400 border-b-2 border-fuchsia-500' : 'text-slate-500'}`}>
+          className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest ${tab === 'products' ? 'text-fuchsia-400 border-b-2 border-fuchsia-500' : 'text-slate-500'}`}>
           🛍️ Produtos
         </button>
         {storeMode === 'scheduling' && (
           <>
             <button onClick={() => setTab('services')}
-              className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest transition-all ${tab === 'services' ? 'text-emerald-400 border-b-2 border-emerald-500' : 'text-slate-500'}`}>
+              className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest ${tab === 'services' ? 'text-emerald-400 border-b-2 border-emerald-500' : 'text-slate-500'}`}>
               ✂️ Serviços
             </button>
             <button onClick={() => setTab('appointments')}
-              className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest transition-all ${tab === 'appointments' ? 'text-cyan-400 border-b-2 border-cyan-500' : 'text-slate-500'}`}>
+              className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest ${tab === 'appointments' ? 'text-cyan-400 border-b-2 border-cyan-500' : 'text-slate-500'}`}>
               📅 Agenda
             </button>
             <button onClick={() => setTab('payments')}
-              className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest transition-all ${tab === 'payments' ? 'text-emerald-400 border-b-2 border-emerald-500' : 'text-slate-500'}`}>
-              💰 Pagamentos
+              className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest ${tab === 'payments' ? 'text-emerald-400 border-b-2 border-emerald-500' : 'text-slate-500'}`}>
+              💰 Pix
             </button>
           </>
         )}
         <button onClick={() => setTab('settings')}
-          className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest transition-all ${tab === 'settings' ? 'text-slate-200 border-b-2 border-white/20' : 'text-slate-500'}`}>
+          className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest ${tab === 'settings' ? 'text-slate-200 border-b-2 border-white/20' : 'text-slate-500'}`}>
           ⚙️ Ajustes
         </button>
       </div>
@@ -513,10 +518,9 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
       <main className="flex-1 mt-32 pb-32 p-4">
         {tab === 'products' && (
           <div className="space-y-4">
-            {/* Store Link Banner */}
             <div className="bg-fuchsia-500/10 border border-fuchsia-500/20 rounded-2xl p-4 flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Link da sua loja</p>
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Link da loja</p>
                 {activeSlug ? (
                   <p className="text-fuchsia-300 font-black text-sm truncate">{activeSlug}.arroba.live</p>
                 ) : (
@@ -526,20 +530,8 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
                 )}
               </div>
               <div className="flex gap-2 flex-shrink-0">
-                <button
-                  onClick={handleCopyLink}
-                  className="p-2 bg-fuchsia-500/20 rounded-xl text-fuchsia-400 active:scale-90 transition-transform"
-                  title="Copiar link"
-                >
-                  <Copy className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={handleOpenStore}
-                  className="p-2 bg-fuchsia-500/20 rounded-xl text-fuchsia-400 active:scale-90 transition-transform"
-                  title="Abrir loja"
-                >
-                  <ExternalLink className="w-4 h-4" />
-                </button>
+                <button onClick={handleCopyLink} className="p-2 bg-fuchsia-500/20 rounded-xl text-fuchsia-400 active:scale-90"><Copy className="w-4 h-4" /></button>
+                <button onClick={handleOpenStore} className="p-2 bg-fuchsia-500/20 rounded-xl text-fuchsia-400 active:scale-90"><ExternalLink className="w-4 h-4" /></button>
               </div>
             </div>
 
@@ -549,7 +541,7 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
               <div className="text-center py-16">
                 <Package className="w-16 h-16 text-slate-700 mx-auto mb-4" />
                 <p className="text-slate-400 font-bold">Nenhum produto cadastrado</p>
-                <p className="text-slate-600 text-sm mt-1">Clique no + para adicionar seu primeiro produto</p>
+                <p className="text-slate-600 text-sm mt-1">Toque no + para adicionar</p>
               </div>
             ) : (
               <div className="space-y-3">
@@ -571,18 +563,14 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
                       <p className="text-xs text-slate-400 truncate">{product.category}</p>
                       <div className="flex items-center gap-2 mt-1">
                         <span className="text-fuchsia-400 font-black text-sm">R$ {product.price.toFixed(2).replace('.', ',')}</span>
-                        {product.originalPrice && (
-                          <span className="text-slate-600 text-xs line-through">R$ {product.originalPrice.toFixed(2).replace('.', ',')}</span>
+                        {product.original_price && (
+                          <span className="text-slate-600 text-xs line-through">R$ {product.original_price.toFixed(2).replace('.', ',')}</span>
                         )}
                       </div>
                     </div>
                     <div className="flex flex-col gap-2">
-                      <button onClick={() => openEditForm(product)} className="p-2 bg-white/5 rounded-xl text-indigo-400 active:scale-90 transition-transform">
-                        <Edit3 className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => handleDelete(product.id)} className="p-2 bg-red-500/10 rounded-xl text-red-400 active:scale-90 transition-transform">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <button onClick={() => openEditForm(product)} className="p-2 bg-white/5 rounded-xl text-indigo-400 active:scale-90"><Edit3 className="w-4 h-4" /></button>
+                      <button onClick={() => handleDelete(product.id)} className="p-2 bg-red-500/10 rounded-xl text-red-400 active:scale-90"><Trash2 className="w-4 h-4" /></button>
                     </div>
                   </motion.div>
                 ))}
@@ -599,7 +587,6 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
               <div className="text-center py-16">
                 <Package className="w-16 h-16 text-slate-700 mx-auto mb-4" />
                 <p className="text-slate-400 font-bold">Nenhum serviço cadastrado</p>
-                <p className="text-slate-600 text-sm mt-1">Clique no + para adicionar seu primeiro serviço</p>
               </div>
             ) : (
               <div className="space-y-3">
@@ -611,16 +598,16 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-white font-bold text-sm truncate">{service.name}</p>
-                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{service.duration} minutos</p>
+                      <p className="text-[10px] text-slate-500 font-bold uppercase">{service.duration} min</p>
                       <p className="text-emerald-400 font-black text-sm mt-1">R$ {service.price.toFixed(2).replace('.', ',')}</p>
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={() => { setEditingService(service); setServiceForm({ name: service.name, price: String(service.price), duration: String(service.duration), description: service.description, active: service.active }); setShowServiceForm(true); }} className="p-2 bg-white/5 rounded-xl text-indigo-400 active:scale-90 transition-transform">
-                        <Edit3 className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => handleDeleteService(service.id)} className="p-2 bg-red-500/10 rounded-xl text-red-400 active:scale-90 transition-transform">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <button onClick={() => {
+                        setEditingService(service);
+                        setServiceForm({ name: service.name, price: String(service.price), duration: String(service.duration), description: service.description || '', active: service.active });
+                        setShowServiceForm(true);
+                      }} className="p-2 bg-white/5 rounded-xl text-indigo-400"><Edit3 className="w-4 h-4" /></button>
+                      <button onClick={() => handleDeleteService(service.id)} className="p-2 bg-red-500/10 rounded-xl text-red-400"><Trash2 className="w-4 h-4" /></button>
                     </div>
                   </motion.div>
                 ))}
@@ -636,17 +623,17 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
             ) : appointments.length === 0 ? (
               <div className="text-center py-16">
                 <Calendar className="w-16 h-16 text-slate-700 mx-auto mb-4" />
-                <p className="text-slate-400 font-bold">Nenhum agendamento recebido</p>
+                <p className="text-slate-400 font-bold">Nenhum agendamento</p>
               </div>
             ) : (
               <div className="space-y-3">
                 {appointments.map(app => (
                   <motion.div key={app.id} layout
-                    className={`bg-white/5 border rounded-2xl p-4 border-white/10 ${app.status === 'confirmed' ? 'border-emerald-500/30 bg-emerald-500/5' : ''}`}>
+                    className={`bg-white/5 border rounded-2xl p-4 ${app.status === 'confirmed' ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-white/10'}`}>
                     <div className="flex justify-between items-start mb-3">
                       <div>
-                        <p className="text-white font-black text-sm">{app.customerName}</p>
-                        <p className="text-xs text-slate-400 font-bold">{app.customerPhone}</p>
+                        <p className="text-white font-black text-sm">{app.customer_name}</p>
+                        <p className="text-xs text-slate-400 font-bold">{app.customer_phone}</p>
                       </div>
                       <span className={`text-[10px] font-black uppercase px-2 py-1 rounded-lg ${
                         app.status === 'confirmed' ? 'bg-emerald-500/20 text-emerald-400' :
@@ -656,26 +643,22 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
                       </span>
                     </div>
                     <div className="bg-white/5 rounded-xl p-3 mb-4">
-                      <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-1">Serviço & Horário</p>
-                      <p className="text-white font-bold text-xs">{app.serviceName}</p>
-                      <p className="text-cyan-400 font-black text-xs mt-1">
-                        {new Date(app.appointmentTime).toLocaleString('pt-BR')}
-                      </p>
+                      <p className="text-[10px] text-slate-500 font-black uppercase mb-1">Serviço</p>
+                      <p className="text-white font-bold text-xs">{app.service_name}</p>
+                      <p className="text-cyan-400 font-black text-xs mt-1">{new Date(app.appointment_time).toLocaleString('pt-BR')}</p>
                     </div>
                     <div className="flex gap-2">
                       {app.status === 'pending' && (
                         <>
-                          <button onClick={() => handleUpdateAppointmentStatus(app.id, 'confirmed')} className="flex-1 bg-emerald-500 text-white font-black py-2.5 rounded-xl text-xs active:scale-95 transition-all">
-                            Confirmar
-                          </button>
-                          <button onClick={() => handleUpdateAppointmentStatus(app.id, 'rejected')} className="flex-1 bg-white/5 text-red-400 font-black py-2.5 rounded-xl text-xs active:scale-95 transition-all">
-                            Recusar
-                          </button>
+                          <button onClick={() => handleUpdateAppointmentStatus(app.id, 'confirmed')} className="flex-1 bg-emerald-500 text-white font-black py-2.5 rounded-xl text-xs">Confirmar</button>
+                          <button onClick={() => handleUpdateAppointmentStatus(app.id, 'rejected')} className="flex-1 bg-white/5 text-red-400 font-black py-2.5 rounded-xl text-xs">Recusar</button>
                         </>
                       )}
-                      <a href={`https://wa.me/55${app.customerPhone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" className="p-2.5 bg-emerald-500/10 text-emerald-400 rounded-xl active:scale-95 transition-all">
-                        <MessageCircle className="w-4 h-4" />
-                      </a>
+                      {app.customer_phone && (
+                        <a href={`https://wa.me/55${app.customer_phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" className="p-2.5 bg-emerald-500/10 text-emerald-400 rounded-xl">
+                          <MessageCircle className="w-4 h-4" />
+                        </a>
+                      )}
                     </div>
                   </motion.div>
                 ))}
@@ -688,21 +671,16 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
           <div className="space-y-6">
             <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-3xl p-6">
               <div className="flex items-center gap-3 mb-4">
-                <div className="p-2 bg-emerald-500 rounded-xl">
-                  <DollarSign className="w-5 h-5 text-white" />
-                </div>
+                <div className="p-2 bg-emerald-500 rounded-xl"><DollarSign className="w-5 h-5 text-white" /></div>
                 <div>
-                  <h3 className="text-white font-black text-sm">Efi Bank (Gerencianet)</h3>
-                  <p className="text-[10px] text-emerald-400 font-bold uppercase">Integração Pix</p>
+                  <h3 className="text-white font-black text-sm">Efi Bank (Pix)</h3>
                 </div>
               </div>
-              <p className="text-slate-400 text-xs leading-relaxed mb-6">
-                Conecte sua conta Efi para receber pagamentos via Pix automaticamente.
-              </p>
+              <p className="text-slate-400 text-xs mb-6">Conecte sua conta para receber pagamentos via Pix.</p>
 
               <div className="space-y-4">
                 <div className="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center justify-between">
-                  <p className="text-white font-bold text-sm">Ativar Pagamentos</p>
+                  <p className="text-white font-bold text-sm">Ativar</p>
                   <button onClick={() => setEfiConfig({ ...efiConfig, active: !efiConfig.active })}>
                     {efiConfig.active ? <ToggleRight className="w-8 h-8 text-emerald-400" /> : <ToggleLeft className="w-8 h-8 text-slate-600" />}
                   </button>
@@ -713,59 +691,46 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
                     <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="space-y-4 overflow-hidden">
                       <div>
                         <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Client ID</label>
-                        <input
-                          type="password" value={efiConfig.clientId} onChange={e => setEfiConfig({ ...efiConfig, clientId: e.target.value })}
-                          placeholder="Client_Id_..."
-                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white text-xs font-medium focus:border-emerald-500/50 outline-none"
-                        />
+                        <input type="password" value={efiConfig.clientId} onChange={e => setEfiConfig({ ...efiConfig, clientId: e.target.value })}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white text-xs" />
                       </div>
                       <div>
                         <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Client Secret</label>
-                        <input
-                          type="password" value={efiConfig.clientSecret} onChange={e => setEfiConfig({ ...efiConfig, clientSecret: e.target.value })}
-                          placeholder="Client_Secret_..."
-                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white text-xs font-medium focus:border-emerald-500/50 outline-none"
-                        />
+                        <input type="password" value={efiConfig.clientSecret} onChange={e => setEfiConfig({ ...efiConfig, clientSecret: e.target.value })}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white text-xs" />
                       </div>
                       <div>
                         <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Chave Pix</label>
-                        <input
-                          value={efiConfig.key} onChange={e => setEfiConfig({ ...efiConfig, key: e.target.value })}
-                          placeholder="Sua chave Pix cadastrada na Efi"
-                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white text-xs font-medium focus:border-emerald-500/50 outline-none"
-                        />
+                        <input value={efiConfig.key} onChange={e => setEfiConfig({ ...efiConfig, key: e.target.value })}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white text-xs" />
                       </div>
                     </motion.div>
                   )}
                 </AnimatePresence>
               </div>
             </div>
-            
-            <button
-              onClick={handleSaveSettings}
-              disabled={savingSettings}
-              className="w-full bg-indigo-500 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50 shadow-primary-glow"
-            >
-              {savingSettings ? <Loader className="w-5 h-5 animate-spin" /> : 'Salvar Configurações'}
+
+            <button onClick={handleSaveSettings} disabled={savingSettings}
+              className="w-full bg-indigo-500 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50 shadow-primary-glow">
+              {savingSettings ? <Loader className="w-5 h-5 animate-spin" /> : 'Salvar'}
             </button>
           </div>
         )}
 
         {tab === 'settings' && (
           <div className="space-y-6">
-            {/* Mode Selection */}
             <div>
               <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-3">Modo de Operação</label>
               <div className="grid grid-cols-1 gap-2">
                 {[
-                  { id: 'store', label: 'Loja de Produtos', icon: ShoppingBag, desc: 'Catálogo simples para vendas' },
-                  { id: 'store+ai', label: 'Loja + Atendimento IA', icon: MessageCircle, desc: 'Vendas com assistente Gemini' },
-                  { id: 'scheduling', label: 'Sistema de Agendamento', icon: Calendar, desc: 'Para salões, clínicas e serviços' }
+                  { id: 'store', label: 'Loja de Produtos', icon: ShoppingBag, desc: 'Catálogo simples' },
+                  { id: 'store+ai', label: 'Loja + IA', icon: MessageCircle, desc: 'Vendas com assistente' },
+                  { id: 'scheduling', label: 'Agendamento', icon: Calendar, desc: 'Salões, clínicas, serviços' },
                 ].map(m => (
                   <button
                     key={m.id}
                     onClick={() => setStoreMode(m.id as any)}
-                    className={`p-4 rounded-2xl border flex items-center gap-4 transition-all ${storeMode === m.id ? 'bg-fuchsia-500/10 border-fuchsia-500 shadow-glass' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}
+                    className={`p-4 rounded-2xl border flex items-center gap-4 transition-all ${storeMode === m.id ? 'bg-fuchsia-500/10 border-fuchsia-500 shadow-glass' : 'bg-white/5 border-white/10'}`}
                   >
                     <div className={`p-3 rounded-xl ${storeMode === m.id ? 'bg-fuchsia-500 text-white' : 'bg-white/5 text-slate-500'}`}>
                       <m.icon className="w-5 h-5" />
@@ -779,25 +744,23 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
               </div>
             </div>
 
-            {/* Description */}
             <div>
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Descrição da Loja</label>
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Descrição</label>
               <textarea
                 value={storeDescription}
                 onChange={(e) => setStoreDescription(e.target.value)}
-                placeholder="Descreva sua loja para os visitantes..."
+                placeholder="Descreva sua loja..."
                 rows={4}
-                className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-white text-sm font-medium focus:outline-none focus:border-fuchsia-500/50 resize-none"
+                className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-white text-sm font-medium resize-none"
               />
             </div>
 
-            {/* Custom Link */}
             <div>
               <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Link da Loja</label>
               <div className={`flex items-center bg-white/5 border rounded-2xl overflow-hidden transition-colors ${
                 slugStatus.state === 'error' ? 'border-red-500/50' :
                 slugStatus.state === 'ok' ? 'border-emerald-500/50' :
-                'border-white/10 focus-within:border-fuchsia-500/50'
+                'border-white/10'
               }`}>
                 <input
                   value={professionalSlug}
@@ -809,68 +772,47 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
                 <span className="pr-4 text-slate-500 font-bold text-sm">.arroba.live</span>
               </div>
 
-              {/* Feedback de validação */}
-              <div className="mt-2 px-1 min-h-[18px] flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider">
-                {slugStatus.state === 'checking' && (
-                  <><Loader className="w-3 h-3 animate-spin text-slate-400" /><span className="text-slate-400">Verificando...</span></>
-                )}
-                {slugStatus.state === 'ok' && (
-                  <><CheckCircle className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">{slugStatus.message}</span></>
-                )}
-                {slugStatus.state === 'error' && (
-                  <><AlertCircle className="w-3 h-3 text-red-400" /><span className="text-red-400">{slugStatus.message}</span></>
-                )}
-                {slugStatus.state === 'idle' && !professionalSlug && (
-                  <span className="text-slate-600">Mín. 3 caracteres. Apenas letras, números e hífens.</span>
-                )}
+              <div className="mt-2 px-1 min-h-[18px] flex items-center gap-2 text-[10px] font-bold uppercase">
+                {slugStatus.state === 'checking' && (<><Loader className="w-3 h-3 animate-spin text-slate-400" /><span className="text-slate-400">Verificando...</span></>)}
+                {slugStatus.state === 'ok' && (<><CheckCircle className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">{slugStatus.message}</span></>)}
+                {slugStatus.state === 'error' && (<><AlertCircle className="w-3 h-3 text-red-400" /><span className="text-red-400">{slugStatus.message}</span></>)}
+                {slugStatus.state === 'idle' && !professionalSlug && (<span className="text-slate-600">Mín. 3 caracteres. Letras, números e hífens.</span>)}
               </div>
 
-              {/* Ações sobre o link atual */}
               {activeSlug && (
                 <div className="mt-3 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={handleCopyLink}
-                    className="flex-1 py-2.5 bg-white/5 border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-300 flex items-center justify-center gap-2 active:scale-95"
-                  >
+                  <button type="button" onClick={handleCopyLink}
+                    className="flex-1 py-2.5 bg-white/5 border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-300 flex items-center justify-center gap-2">
                     <Copy className="w-3.5 h-3.5" /> Copiar
                   </button>
-                  <button
-                    type="button"
-                    onClick={handleOpenStore}
-                    className="flex-1 py-2.5 bg-fuchsia-500/10 border border-fuchsia-500/30 rounded-xl text-[10px] font-black uppercase tracking-widest text-fuchsia-300 flex items-center justify-center gap-2 active:scale-95"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" /> Abrir Loja
+                  <button type="button" onClick={handleOpenStore}
+                    className="flex-1 py-2.5 bg-fuchsia-500/10 border border-fuchsia-500/30 rounded-xl text-[10px] font-black uppercase tracking-widest text-fuchsia-300 flex items-center justify-center gap-2">
+                    <ExternalLink className="w-3.5 h-3.5" /> Abrir
                   </button>
                 </div>
               )}
             </div>
 
-            {/* Access Code Toggle */}
             <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <p className="text-white font-bold text-sm">Código de Acesso</p>
                   <p className="text-slate-400 text-xs mt-0.5">Exige código para ver a loja</p>
                 </div>
-                <button onClick={() => setAccessCodeEnabled(!accessCodeEnabled)} className="transition-transform active:scale-90">
-                  {accessCodeEnabled
-                    ? <ToggleRight className="w-8 h-8 text-fuchsia-400" />
-                    : <ToggleLeft className="w-8 h-8 text-slate-600" />}
+                <button onClick={() => setAccessCodeEnabled(!accessCodeEnabled)}>
+                  {accessCodeEnabled ? <ToggleRight className="w-8 h-8 text-fuchsia-400" /> : <ToggleLeft className="w-8 h-8 text-slate-600" />}
                 </button>
               </div>
-              
+
               {accessCodeEnabled && (
                 <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Código Mestre (6 dígitos)</label>
                   <input
                     value={accessCode}
                     onChange={(e) => setAccessCode(e.target.value.toUpperCase())}
                     maxLength={6}
                     placeholder="EX: ABC123"
-                    className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white font-black tracking-[0.3em] text-center focus:outline-none focus:border-fuchsia-500/50"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white font-black tracking-[0.3em] text-center"
                   />
-                  <p className="text-[9px] text-slate-600 mt-2 text-center">Os visitantes precisarão deste código para entrar.</p>
                 </motion.div>
               )}
             </div>
@@ -887,213 +829,144 @@ export const StoreManagerScreen: React.FC<StoreManagerScreenProps> = ({ setScree
         )}
       </main>
 
-      {/* FAB Add Product/Service */}
       {(tab === 'products' || tab === 'services') && (
         <motion.button
           whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
           onClick={() => tab === 'products' ? openAddForm() : setShowServiceForm(true)}
-          className={`fixed bottom-8 right-6 w-16 h-16 text-white rounded-full shadow-2xl flex items-center justify-center z-40 ${tab === 'products' ? 'bg-fuchsia-500 shadow-fuchsia-500/20' : 'bg-emerald-500 shadow-emerald-500/20'}`}
+          className={`fixed bottom-8 right-6 w-16 h-16 text-white rounded-full shadow-2xl flex items-center justify-center z-40 ${tab === 'products' ? 'bg-fuchsia-500' : 'bg-emerald-500'}`}
         >
           <Plus className="w-7 h-7" />
         </motion.button>
       )}
 
-      {/* Product Form Modal */}
+      {/* Form Produto */}
       <AnimatePresence>
         {showForm && (
-          <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-md z-[200] flex items-end"
-          >
-            <motion.div
-              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
-              transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-              className="w-full max-h-[90vh] bg-slate-900 rounded-t-3xl overflow-y-auto"
-            >
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/60 backdrop-blur-md z-[200] flex items-end">
+            <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} className="w-full max-h-[90vh] bg-slate-900 rounded-t-3xl overflow-y-auto">
               <div className="sticky top-0 bg-slate-900 px-6 pt-6 pb-4 border-b border-white/5 flex items-center justify-between z-10">
                 <h2 className="text-lg font-black text-white">{editingProduct ? 'Editar Produto' : 'Novo Produto'}</h2>
-                <button onClick={() => setShowForm(false)} className="p-2 bg-white/5 rounded-xl text-slate-400 active:scale-90">
-                  <X className="w-5 h-5" />
-                </button>
+                <button onClick={() => setShowForm(false)} className="p-2 bg-white/5 rounded-xl text-slate-400"><X className="w-5 h-5" /></button>
               </div>
 
               <div className="p-6 space-y-5">
-                {/* Image Upload */}
                 <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Foto do Produto</label>
-                  <div
-                    onClick={() => fileInputRef.current?.click()}
-                    className="w-full h-36 rounded-2xl border-2 border-dashed border-white/10 flex flex-col items-center justify-center gap-2 cursor-pointer active:scale-98 transition-all hover:border-fuchsia-500/40"
-                  >
-                    {uploadingImg ? (
-                      <Loader className="w-8 h-8 text-fuchsia-400 animate-spin" />
-                    ) : form.image ? (
-                      <img src={form.image} className="w-full h-full object-cover rounded-2xl" alt="Preview" />
-                    ) : (
-                      <>
-                        <Image className="w-8 h-8 text-slate-600" />
-                        <p className="text-slate-500 text-xs font-bold">Toque para adicionar foto</p>
-                      </>
-                    )}
+                  <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Foto</label>
+                  <div onClick={() => fileInputRef.current?.click()}
+                    className="w-full h-36 rounded-2xl border-2 border-dashed border-white/10 flex flex-col items-center justify-center gap-2 cursor-pointer">
+                    {uploadingImg ? <Loader className="w-8 h-8 text-fuchsia-400 animate-spin" /> :
+                     form.image ? <img src={form.image} className="w-full h-full object-cover rounded-2xl" /> :
+                     <><Image className="w-8 h-8 text-slate-600" /><p className="text-slate-500 text-xs font-bold">Toque para adicionar</p></>}
                   </div>
                 </div>
 
-                {/* Name */}
                 <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Nome do Produto *</label>
-                  <input
-                    value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                    placeholder="Ex: Camiseta Básica"
-                    className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white font-medium focus:outline-none focus:border-fuchsia-500/50"
-                  />
+                  <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Nome *</label>
+                  <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                    className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white" />
                 </div>
 
-                {/* Price Row */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Preço (R$) *</label>
-                    <input
-                      type="number" value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))}
-                      placeholder="49,90"
-                      className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white font-medium focus:outline-none focus:border-fuchsia-500/50"
-                    />
+                    <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Preço (R$) *</label>
+                    <input type="number" value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))}
+                      className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white" />
                   </div>
                   <div>
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Preço Original</label>
-                    <input
-                      type="number" value={form.originalPrice} onChange={e => setForm(f => ({ ...f, originalPrice: e.target.value }))}
-                      placeholder="69,90"
-                      className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white font-medium focus:outline-none focus:border-fuchsia-500/50"
-                    />
+                    <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Original</label>
+                    <input type="number" value={form.originalPrice} onChange={e => setForm(f => ({ ...f, originalPrice: e.target.value }))}
+                      className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white" />
                   </div>
                 </div>
 
-                {/* Category */}
                 <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Categoria</label>
+                  <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Categoria</label>
                   <div className="flex flex-wrap gap-2">
                     {CATEGORIES.map(cat => (
                       <button key={cat} onClick={() => setForm(f => ({ ...f, category: cat }))}
-                        className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${form.category === cat ? 'bg-fuchsia-500 text-white' : 'bg-white/5 text-slate-400 border border-white/10'}`}>
+                        className={`px-3 py-1.5 rounded-full text-xs font-bold ${form.category === cat ? 'bg-fuchsia-500 text-white' : 'bg-white/5 text-slate-400 border border-white/10'}`}>
                         {cat}
                       </button>
                     ))}
                   </div>
                 </div>
 
-                {/* Description */}
                 <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Descrição</label>
-                  <textarea
-                    value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-                    placeholder="Descreva o produto..."
-                    rows={3}
-                    className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white font-medium focus:outline-none focus:border-fuchsia-500/50 resize-none"
-                  />
+                  <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Descrição</label>
+                  <textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                    rows={3} className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white resize-none" />
                 </div>
 
-                {/* Active Toggle */}
                 <div className="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center justify-between">
-                  <p className="text-white font-bold text-sm">Produto Ativo</p>
+                  <p className="text-white font-bold text-sm">Ativo</p>
                   <button onClick={() => setForm(f => ({ ...f, active: !f.active }))}>
-                    {form.active
-                      ? <ToggleRight className="w-8 h-8 text-fuchsia-400" />
-                      : <ToggleLeft className="w-8 h-8 text-slate-600" />}
+                    {form.active ? <ToggleRight className="w-8 h-8 text-fuchsia-400" /> : <ToggleLeft className="w-8 h-8 text-slate-600" />}
                   </button>
                 </div>
 
-                <motion.button
-                  whileTap={{ scale: 0.97 }} onClick={handleSave}
-                  disabled={saving || !form.name || !form.price}
-                  className="w-full bg-fuchsia-500 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg"
-                >
-                  {saving ? <Loader className="w-5 h-5 animate-spin" /> : (editingProduct ? 'Salvar Alterações' : 'Cadastrar Produto')}
+                <motion.button whileTap={{ scale: 0.97 }} onClick={handleSave} disabled={saving || !form.name || !form.price}
+                  className="w-full bg-fuchsia-500 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50">
+                  {saving ? <Loader className="w-5 h-5 animate-spin" /> : (editingProduct ? 'Salvar' : 'Cadastrar')}
                 </motion.button>
               </div>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
-      
-      {/* Service Form Modal */}
+
+      {/* Form Serviço */}
       <AnimatePresence>
         {showServiceForm && (
-          <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-md z-[200] flex items-end"
-          >
-            <motion.div
-              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
-              className="w-full max-h-[90vh] bg-slate-900 rounded-t-3xl overflow-y-auto"
-            >
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/60 backdrop-blur-md z-[200] flex items-end">
+            <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} className="w-full max-h-[90vh] bg-slate-900 rounded-t-3xl overflow-y-auto">
               <div className="sticky top-0 bg-slate-900 px-6 pt-6 pb-4 border-b border-white/5 flex items-center justify-between z-10">
                 <h2 className="text-lg font-black text-white">{editingService ? 'Editar Serviço' : 'Novo Serviço'}</h2>
-                <button onClick={() => { setShowServiceForm(false); setEditingService(null); }} className="p-2 bg-white/5 rounded-xl text-slate-400 active:scale-90">
-                  <X className="w-5 h-5" />
-                </button>
+                <button onClick={() => { setShowServiceForm(false); setEditingService(null); }} className="p-2 bg-white/5 rounded-xl text-slate-400"><X className="w-5 h-5" /></button>
               </div>
 
               <div className="p-6 space-y-5">
-                {/* Name */}
                 <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Nome do Serviço *</label>
-                  <input
-                    value={serviceForm.name} onChange={e => setServiceForm(f => ({ ...f, name: e.target.value }))}
-                    placeholder="Ex: Corte de Cabelo"
-                    className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white font-medium focus:outline-none focus:border-emerald-500/50"
-                  />
+                  <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Nome *</label>
+                  <input value={serviceForm.name} onChange={e => setServiceForm(f => ({ ...f, name: e.target.value }))}
+                    className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white" />
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Preço (R$) *</label>
-                    <input
-                      type="number" value={serviceForm.price} onChange={e => setServiceForm(f => ({ ...f, price: e.target.value }))}
-                      placeholder="50,00"
-                      className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white font-medium focus:outline-none focus:border-emerald-500/50"
-                    />
+                    <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Preço *</label>
+                    <input type="number" value={serviceForm.price} onChange={e => setServiceForm(f => ({ ...f, price: e.target.value }))}
+                      className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white" />
                   </div>
                   <div>
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Duração (Min)</label>
-                    <select
-                      value={serviceForm.duration} onChange={e => setServiceForm(f => ({ ...f, duration: e.target.value }))}
-                      className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white font-medium focus:outline-none focus:border-emerald-500/50"
-                    >
+                    <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Duração</label>
+                    <select value={serviceForm.duration} onChange={e => setServiceForm(f => ({ ...f, duration: e.target.value }))}
+                      className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white">
                       <option value="15" className="bg-slate-900">15 min</option>
                       <option value="30" className="bg-slate-900">30 min</option>
                       <option value="45" className="bg-slate-900">45 min</option>
                       <option value="60" className="bg-slate-900">1 hora</option>
-                      <option value="90" className="bg-slate-900">1h 30min</option>
+                      <option value="90" className="bg-slate-900">1h 30</option>
                       <option value="120" className="bg-slate-900">2 horas</option>
                     </select>
                   </div>
                 </div>
 
                 <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">Descrição</label>
-                  <textarea
-                    value={serviceForm.description} onChange={e => setServiceForm(f => ({ ...f, description: e.target.value }))}
-                    placeholder="O que inclui este serviço?"
-                    rows={3}
-                    className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white font-medium focus:outline-none focus:border-emerald-500/50 resize-none"
-                  />
+                  <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Descrição</label>
+                  <textarea value={serviceForm.description} onChange={e => setServiceForm(f => ({ ...f, description: e.target.value }))}
+                    rows={3} className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white resize-none" />
                 </div>
 
                 <div className="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center justify-between">
-                  <p className="text-white font-bold text-sm">Serviço Disponível</p>
+                  <p className="text-white font-bold text-sm">Disponível</p>
                   <button onClick={() => setServiceForm(f => ({ ...f, active: !f.active }))}>
-                    {serviceForm.active
-                      ? <ToggleRight className="w-8 h-8 text-emerald-400" />
-                      : <ToggleLeft className="w-8 h-8 text-slate-600" />}
+                    {serviceForm.active ? <ToggleRight className="w-8 h-8 text-emerald-400" /> : <ToggleLeft className="w-8 h-8 text-slate-600" />}
                   </button>
                 </div>
 
-                <motion.button
-                  whileTap={{ scale: 0.97 }} onClick={handleSaveService}
-                  disabled={saving || !serviceForm.name || !serviceForm.price}
-                  className="w-full bg-emerald-500 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg"
-                >
-                  {saving ? <Loader className="w-5 h-5 animate-spin" /> : (editingService ? 'Salvar Alterações' : 'Cadastrar Serviço')}
+                <motion.button whileTap={{ scale: 0.97 }} onClick={handleSaveService} disabled={saving || !serviceForm.name || !serviceForm.price}
+                  className="w-full bg-emerald-500 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50">
+                  {saving ? <Loader className="w-5 h-5 animate-spin" /> : (editingService ? 'Salvar' : 'Cadastrar')}
                 </motion.button>
               </div>
             </motion.div>

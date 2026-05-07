@@ -1,170 +1,166 @@
-// Este arquivo simula a lógica de um Cloudflare Worker para o Cloudflare Calls
-// No servidor real, isso rodaria no edge da Cloudflare.
-// E no Frontend ele contém o cliente WebRTC.
-
-import { db } from './firebase';
-import { collection, doc, setDoc, onSnapshot, getDoc, updateDoc } from 'firebase/firestore';
-
 /**
- * ==========================================
- * PARTE 1: BACKEND (WORKER / SERVER.TS)
- * ==========================================
- * No Cloudflare Worker, você recebe as credenciais de autenticação (ex: Firebase Token)
- * e, se válido, chama a API do Cloudflare Calls para criar uma sessão.
+ * Cliente WebRTC com sinalização via Supabase Realtime.
+ *
+ * Tabelas:
+ *   arroba.calls               — uma linha por chamada (offer / answer / status)
+ *   arroba.call_ice_candidates — ICE candidates por chamada (caller/callee)
  */
-export async function createCloudflareCallsSession(appId: string, appSecret: string) {
-  const response = await fetch(`https://rtc.live.cloudflare.com/v1/apps/${appId}/sessions/new`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${appSecret}`,
-      'Content-Type': 'application/json'
-    }
-  });
-  if (!response.ok) {
-    throw new Error('Falha ao criar sessão no Cloudflare Calls');
-  }
-  return await response.json();
-}
+import { supabase } from './supabase';
 
-/**
- * ==========================================
- * PARTE 2: SIGNALING & WEBRTC (FRONTEND)
- * ==========================================
- * Utiliza o Firestore (ou Realtime Database) para trocar ICE Candidates e SDP.
- */
 export class CallsClient {
   private pc: RTCPeerConnection;
   private localStream: MediaStream | null = null;
   private remoteStream: MediaStream = new MediaStream();
   private chatId: string;
   private userUid: string;
+  private callId: string | null = null;
+  private channel: ReturnType<typeof supabase.channel> | null = null;
   private onTrackCb?: (stream: MediaStream) => void;
   private onConnectCb?: () => void;
 
-  constructor(chatId: string, userUid: string, onTrackCb?: (stream: MediaStream) => void, onConnectCb?: () => void) {
+  constructor(
+    chatId: string,
+    userUid: string,
+    onTrackCb?: (stream: MediaStream) => void,
+    onConnectCb?: () => void
+  ) {
     this.chatId = chatId;
     this.userUid = userUid;
     this.onTrackCb = onTrackCb;
     this.onConnectCb = onConnectCb;
-    
-    // Stun servers
+
     this.pc = new RTCPeerConnection({
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
-      ]
+        { urls: 'stun:stun1.l.google.com:19302' },
+      ],
     });
 
     this.pc.ontrack = (event) => {
-      event.streams[0].getTracks().forEach(track => {
+      event.streams[0].getTracks().forEach((track) => {
         this.remoteStream.addTrack(track);
       });
-      if (this.onTrackCb) this.onTrackCb(this.remoteStream);
+      this.onTrackCb?.(this.remoteStream);
     };
 
     this.pc.onconnectionstatechange = () => {
-      if (this.pc.connectionState === 'connected') {
-        if (this.onConnectCb) this.onConnectCb();
-      }
+      if (this.pc.connectionState === 'connected') this.onConnectCb?.();
     };
   }
 
-  async startCall(localVideoElement?: HTMLVideoElement, isVideo: boolean = true) {
-    // 1. Get Local Media
-    this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: isVideo });
-    if (localVideoElement) {
-      localVideoElement.srcObject = this.localStream;
-    }
-    
-    this.localStream.getTracks().forEach(track => {
-      this.pc.addTrack(track, this.localStream!);
-    });
+  private subscribeIce(callId: string, listenRole: 'caller' | 'callee') {
+    if (this.channel) supabase.removeChannel(this.channel);
+    this.channel = supabase
+      .channel(`call:${callId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'arroba', table: 'call_ice_candidates', filter: `call_id=eq.${callId}` },
+        (payload) => {
+          const row = payload.new as { role: 'caller' | 'callee'; candidate: any };
+          if (row.role === listenRole && row.candidate) {
+            this.pc.addIceCandidate(new RTCIceCandidate(row.candidate)).catch(console.warn);
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'arroba', table: 'calls', filter: `id=eq.${callId}` },
+        (payload) => {
+          const row = payload.new as any;
+          if (row.answer && !this.pc.currentRemoteDescription) {
+            this.pc.setRemoteDescription(new RTCSessionDescription(row.answer)).catch(console.warn);
+          }
+        }
+      )
+      .subscribe();
+  }
 
-    // 2. Create Offer
+  async startCall(localVideoElement?: HTMLVideoElement, isVideo = true) {
+    this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: isVideo });
+    if (localVideoElement) localVideoElement.srcObject = this.localStream;
+    this.localStream.getTracks().forEach((t) => this.pc.addTrack(t, this.localStream!));
+
     const offer = await this.pc.createOffer();
     await this.pc.setLocalDescription(offer);
 
-    // 3. Signal Offer via Firebase
-    const callRef = doc(collection(db, 'calls'), this.chatId);
-    await setDoc(callRef, {
-      offer: { type: offer.type, sdp: offer.sdp },
-      callerId: this.userUid,
-      isVideo: isVideo,
-      createdAt: new Date()
-    });
+    const { data, error } = await supabase
+      .from('calls')
+      .insert({
+        chat_id: this.chatId,
+        caller_id: this.userUid,
+        offer: { type: offer.type, sdp: offer.sdp },
+        status: 'ringing',
+      })
+      .select('id')
+      .single();
+    if (error) throw error;
 
-    // Listen for Answer
-    onSnapshot(callRef, (snapshot) => {
-      const data = snapshot.data();
-      if (!this.pc.currentRemoteDescription && data?.answer) {
-        const answer = new RTCSessionDescription(data.answer);
-        this.pc.setRemoteDescription(answer);
-      }
-    });
+    this.callId = data!.id;
+    this.subscribeIce(this.callId!, 'callee');
 
-    // Setup ICE gathering signaling...
-    this.pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        // Enviar para Firebase (collection 'callerCandidates')
-        const candidateRef = doc(collection(db, 'calls', this.chatId, 'callerCandidates'));
-        setDoc(candidateRef, event.candidate.toJSON());
+    this.pc.onicecandidate = async (event) => {
+      if (event.candidate && this.callId) {
+        await supabase.from('call_ice_candidates').insert({
+          call_id: this.callId,
+          role: 'caller',
+          candidate: event.candidate.toJSON(),
+        });
       }
     };
   }
 
-  async answerCall(localVideoElement?: HTMLVideoElement, isVideo: boolean = true) {
-    const callRef = doc(collection(db, 'calls'), this.chatId);
-    const callSnap = await getDoc(callRef);
-    if (!callSnap.exists()) return;
+  async answerCall(localVideoElement?: HTMLVideoElement, isVideo = true) {
+    const { data: call } = await supabase
+      .from('calls')
+      .select('*')
+      .eq('chat_id', this.chatId)
+      .eq('status', 'ringing')
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!call) return;
+
+    this.callId = call.id;
 
     this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: isVideo });
-    if (localVideoElement) {
-      localVideoElement.srcObject = this.localStream;
-    }
-    this.localStream.getTracks().forEach(track => {
-      this.pc.addTrack(track, this.localStream!);
-    });
+    if (localVideoElement) localVideoElement.srcObject = this.localStream;
+    this.localStream.getTracks().forEach((t) => this.pc.addTrack(t, this.localStream!));
 
-    const data = callSnap.data();
-    await this.pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-
+    await this.pc.setRemoteDescription(new RTCSessionDescription(call.offer));
     const answer = await this.pc.createAnswer();
     await this.pc.setLocalDescription(answer);
 
-    // Salvar answer
-    updateDoc(callRef, {
-      answer: { type: answer.type, sdp: answer.sdp }
-    });
+    await supabase
+      .from('calls')
+      .update({ answer: { type: answer.type, sdp: answer.sdp }, status: 'active', callee_id: this.userUid })
+      .eq('id', this.callId);
 
-    // Receive ICE Candidates from caller...
-    onSnapshot(collection(db, 'calls', this.chatId, 'callerCandidates'), (snapshot) => {
-      snapshot.docChanges().forEach(change => {
-        if (change.type === 'added') {
-          const candidate = new RTCIceCandidate(change.doc.data());
-          this.pc.addIceCandidate(candidate);
-        }
-      });
-    });
+    this.subscribeIce(this.callId!, 'caller');
 
-    this.pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        const candidateRef = doc(collection(db, 'calls', this.chatId, 'calleeCandidates'));
-        setDoc(candidateRef, event.candidate.toJSON());
+    this.pc.onicecandidate = async (event) => {
+      if (event.candidate && this.callId) {
+        await supabase.from('call_ice_candidates').insert({
+          call_id: this.callId,
+          role: 'callee',
+          candidate: event.candidate.toJSON(),
+        });
       }
     };
   }
 
   async endCall() {
     this.pc.close();
-    if (this.localStream) {
-      this.localStream.getTracks().forEach(t => t.stop());
-    }
-    
-    try {
-      const callRef = doc(collection(db, 'calls'), this.chatId);
-      await updateDoc(callRef, { endedAt: new Date() });
-    } catch (e) {
-      console.error(e);
+    this.localStream?.getTracks().forEach((t) => t.stop());
+    if (this.channel) supabase.removeChannel(this.channel);
+    if (this.callId) {
+      try {
+        await supabase
+          .from('calls')
+          .update({ status: 'ended', ended_at: new Date().toISOString() })
+          .eq('id', this.callId);
+      } catch (e) {
+        console.warn('endCall update failed', e);
+      }
     }
   }
 }

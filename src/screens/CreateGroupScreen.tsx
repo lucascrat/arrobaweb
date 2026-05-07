@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Search, Camera, ChevronRight, AtSign, Check, Loader2 } from 'lucide-react';
+import { X, Camera, ChevronRight, AtSign, Check, Loader2 } from 'lucide-react';
 import { Screen } from '../types';
 import { useAuth } from '../lib/AuthContext';
-import { db } from '../lib/firebase';
-import { collection, query, limit, getDocs, doc, setDoc, serverTimestamp, addDoc } from 'firebase/firestore';
+import { supabase } from '../lib/supabase';
 import { soundManager } from '../lib/sounds';
 
 interface CreateGroupScreenProps {
@@ -24,23 +23,29 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ setScreen 
 
   useEffect(() => {
     const fetchUsers = async () => {
+      if (!user) return;
       setLoading(true);
       try {
-        const q = query(collection(db, 'users'), limit(20));
-        const snap = await getDocs(q);
-        const fetchedUsers = snap.docs
-          .map(doc => ({ id: doc.id, ...doc.data() } as any))
-          .filter(u => u.uid !== user?.uid);
-        setUsers(fetchedUsers);
+        const { data } = await supabase
+          .from('profiles')
+          .select('id, username, display_name, photo_url')
+          .neq('id', user.id)
+          .limit(50);
+        setUsers((data || []).map((u: any) => ({
+          id: u.id,
+          uid: u.id,
+          username: u.username,
+          displayName: u.display_name,
+          photoURL: u.photo_url,
+        })));
       } catch (error) {
-        console.error("Error fetching users:", error);
+        console.error('fetch users', error);
       } finally {
         setLoading(false);
       }
     };
-
     fetchUsers();
-  }, [user]);
+  }, [user?.id]);
 
   const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -87,37 +92,41 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ setScreen 
   };
 
   const handleCreateGroup = async () => {
-    const finalUsername = groupUsername || groupName.toLowerCase().replace(/[^a-z0-9_]/g, '');
-    if (!groupName || selectedUserIds.length === 0 || !user || !finalUsername) return;
-    
+    if (!groupName || selectedUserIds.length === 0 || !user) return;
+
     setIsCreating(true);
     try {
       soundManager.playChime();
-      const participants = [user.uid, ...selectedUserIds];
-      const chatRef = await addDoc(collection(db, 'chats'), {
-        participants,
-        groupName,
-        username: finalUsername,
-        isGroup: true,
-        createdBy: user.uid,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        lastMessage: 'Grupo criado',
-        lastMessageAt: serverTimestamp(),
-        groupAvatar: groupAvatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(groupName)}&background=random&color=fff&size=128`
-      });
+      const participants = [user.id, ...selectedUserIds];
+      const { data, error } = await supabase
+        .from('chats')
+        .insert({
+          participants,
+          is_group: true,
+          group_name: groupName,
+          group_photo: groupAvatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(groupName)}`,
+          created_by: user.id,
+          last_message_text: 'Grupo criado',
+          last_message_at: new Date().toISOString(),
+        })
+        .select()
+        .single();
 
-      // Add initial system message
-      await addDoc(collection(db, 'chats', chatRef.id, 'messages'), {
-        senderId: 'system',
-        text: `${user.displayName || 'Um administrador'} criou o grupo "${groupName}"`,
-        createdAt: serverTimestamp(),
-        type: 'system'
-      });
+      if (error) throw error;
+
+      if (data?.id) {
+        await supabase.from('messages').insert({
+          chat_id: data.id,
+          sender_id: user.id,
+          text: `${user.displayName || 'Um administrador'} criou o grupo "${groupName}"`,
+          type: 'system',
+          status: 'sent',
+        });
+      }
 
       setScreen('chat-list');
     } catch (error) {
-      console.error("Error creating group:", error);
+      console.error('create group', error);
       soundManager.playAlert();
     } finally {
       setIsCreating(false);

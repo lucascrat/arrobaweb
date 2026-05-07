@@ -6,3 +6,10 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Tokens e segredos locais
+supabase token.txt
+supabase-token.txt
+*.token.txt
+*-credentials.*
+firebase-adminsdk-*.json

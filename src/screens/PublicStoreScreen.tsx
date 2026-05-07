@@ -22,6 +22,7 @@ interface StoreData {
   accessCode?: string;
   storeTheme: string;
   displayName: string;
+  efiConfig?: { active?: boolean; clientId?: string; clientSecret?: string; key?: string };
 }
 
 export const PublicStoreScreen: React.FC<PublicStoreScreenProps> = ({ slug, onClose }) => {

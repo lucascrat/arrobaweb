@@ -459,6 +459,7 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
           const publicUrl = await uploadToR2(audioBlob, fileName);
           
           try {
+            if (!user) return;
             await addDoc(collection(db, 'chats', chatId!, 'messages'), {
               senderId: user.uid,
               audio: publicUrl,
@@ -803,12 +804,12 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
         )}
       </footer>
 
-      {activeCall && (
-        <CallScreen 
-          chatId={chatId} 
-          isReceiving={activeCall.isReceiving} 
+      {activeCall && chatId && (
+        <CallScreen
+          chatId={chatId}
+          isReceiving={activeCall.isReceiving}
           isVideo={activeCall.isVideo}
-          onEndCall={() => setActiveCall(null)} 
+          onEndCall={() => setActiveCall(null)}
         />
       )}
     </div>

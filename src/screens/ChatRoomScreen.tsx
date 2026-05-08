@@ -146,14 +146,15 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
     setUploading(true);
     try {
       const url = await uploadToR2(file);
-      await supabase.from('messages').insert({
+      if (!url) throw new Error('Upload returned empty URL');
+      const { error } = await supabase.from('messages').insert({
         chat_id: chatId,
         sender_id: user.id,
         type,
         media_url: url,
-        text: type === 'image' ? '[imagem]' : type === 'audio' ? '[áudio]' : '[vídeo]',
         status: 'sent',
       });
+      if (error) throw error;
       soundManager.playSent();
     } catch (err) {
       console.error(err);
@@ -214,16 +215,44 @@ export const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ setScreen, chatI
                     ? 'bg-indigo-500 text-white rounded-br-md'
                     : 'bg-white/5 text-slate-100 border border-white/10 rounded-bl-md'
                 }`}>
-                  {m.type === 'image' && m.media_url && (
-                    <img src={m.media_url} className="w-full max-w-xs rounded-xl mb-1" alt="" />
+                  {m.type === 'image' && (
+                    m.media_url
+                      ? <a href={m.media_url} target="_blank" rel="noreferrer">
+                          <img
+                            src={m.media_url}
+                            className="w-full max-w-xs rounded-xl mb-1"
+                            alt="imagem"
+                            onError={(e) => {
+                              const img = e.currentTarget;
+                              console.error('[chat] image failed to load:', m.media_url);
+                              img.style.display = 'none';
+                              const fallback = document.createElement('p');
+                              fallback.textContent = '⚠️ imagem não carregou';
+                              fallback.className = 'text-xs italic opacity-70';
+                              img.parentElement?.appendChild(fallback);
+                            }}
+                          />
+                        </a>
+                      : <p className="text-sm italic opacity-70">[imagem]</p>
                   )}
-                  {m.type === 'video' && m.media_url && (
-                    <video src={m.media_url} controls className="w-full max-w-xs rounded-xl mb-1" />
+                  {m.type === 'video' && (
+                    m.media_url
+                      ? <video
+                          src={m.media_url}
+                          controls
+                          className="w-full max-w-xs rounded-xl mb-1"
+                          onError={() => console.error('[chat] video failed to load:', m.media_url)}
+                        />
+                      : <p className="text-sm italic opacity-70">[vídeo]</p>
                   )}
-                  {m.type === 'audio' && m.media_url && (
-                    <audio src={m.media_url} controls className="max-w-full" />
+                  {m.type === 'audio' && (
+                    m.media_url
+                      ? <audio src={m.media_url} controls className="max-w-full" />
+                      : <p className="text-sm italic opacity-70">[áudio]</p>
                   )}
-                  {m.text && <p className="text-sm whitespace-pre-wrap break-words">{m.text}</p>}
+                  {m.type === 'text' && m.text && (
+                    <p className="text-sm whitespace-pre-wrap break-words">{m.text}</p>
+                  )}
                   <p className={`text-[9px] font-bold mt-1 ${mine ? 'text-white/60' : 'text-slate-500'}`}>
                     {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </p>
